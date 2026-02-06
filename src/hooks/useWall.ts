@@ -1,13 +1,17 @@
 import { useState, useCallback, useRef } from "react";
 import { useAgent } from "agents/react";
-import type { GraffitiPiece, WallState, WallMessage } from "../types";
+import type { GraffitiPiece, WallState, WallMessage, CursorPosition } from "../types";
 
 export function useWall() {
   const [pieces, setPieces] = useState<GraffitiPiece[]>([]);
   const [totalPieces, setTotalPieces] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | undefined>();
+  const [cursors, setCursors] = useState<CursorPosition[]>([]);
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
+  const [wallEpoch, setWallEpoch] = useState(0);
   const hasLoadedHistory = useRef(false);
+  const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const agent = useAgent<WallState>({
     agent: "graffiti-wall",
@@ -31,6 +35,8 @@ export function useWall() {
             setPieces(msg.pieces);
             setTotalPieces(msg.total);
             setTurnstileSiteKey(msg.turnstileSiteKey);
+            setBackgroundImage(msg.backgroundImage);
+            setWallEpoch(msg.wallEpoch);
             hasLoadedHistory.current = true;
           }
           break;
@@ -44,18 +50,38 @@ export function useWall() {
             prev.map((p) => (p.id === msg.piece.id ? msg.piece : p))
           );
           break;
+
+        case "cursor_update":
+          setCursors(msg.cursors);
+          break;
+
+        case "wall_rotated":
+          setBackgroundImage(msg.backgroundImage);
+          setWallEpoch(msg.wallEpoch);
+          break;
       }
     },
   });
 
   const contribute = useCallback(
-    async (text: string, authorName?: string, turnstileToken?: string) => {
+    async (text: string, authorName?: string, turnstileToken?: string, posX?: number, posY?: number) => {
       setIsSubmitting(true);
       try {
-        await agent.call("contribute", [text, authorName, turnstileToken]);
+        await agent.call("contribute", [text, authorName, turnstileToken, posX, posY]);
       } finally {
         setIsSubmitting(false);
       }
+    },
+    [agent]
+  );
+
+  const sendCursor = useCallback(
+    (x: number, y: number, name: string) => {
+      if (cursorThrottleRef.current) return;
+      agent.send(`C:${x},${y},${name}`);
+      cursorThrottleRef.current = setTimeout(() => {
+        cursorThrottleRef.current = null;
+      }, 100);
     },
     [agent]
   );
@@ -77,5 +103,9 @@ export function useWall() {
     isSubmitting,
     totalPieces,
     turnstileSiteKey,
+    cursors,
+    backgroundImage,
+    wallEpoch,
+    sendCursor,
   };
 }
