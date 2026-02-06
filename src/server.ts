@@ -47,6 +47,14 @@ function checkRateLimit(connectionId: string): string | null {
   return null;
 }
 
+// --- Content pre-filter (fast blocklist before LLM moderation) ---
+// Common slurs, hate speech, and explicit terms — catches obvious cases without an AI call
+const PROFANITY_RE = /\b(nigg(?:er|a)|fag(?:got)?|retard|kike|spic|chink|tranny|cunt|cock\s*suck|blow\s*job|gang\s*bang|child\s*porn|kiddie\s*porn|cp\b|kill\s*(?:your)?self)\b/i;
+
+function preFilterContent(text: string): boolean {
+  return PROFANITY_RE.test(text);
+}
+
 // --- Input sanitization ---
 const HTML_TAG_RE = /<[^>]*>/g;
 const SCRIPT_RE = /javascript:|on\w+\s*=|<script|<iframe|<object|<embed/i;
@@ -72,6 +80,10 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 
 export class GraffitiWall extends Agent<Env, WallState> {
   initialState: WallState = { totalPieces: 0 };
+
+  // Concurrency limit for AI generation pipelines
+  private pendingGenerations = 0;
+  private readonly MAX_CONCURRENT_GENERATIONS = 3;
 
   onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS graffiti (
@@ -126,6 +138,11 @@ export class GraffitiWall extends Agent<Env, WallState> {
       throw new Error(rejected);
     }
 
+    // Backpressure: reject before inserting if too many AI pipelines are in-flight
+    if (this.pendingGenerations >= this.MAX_CONCURRENT_GENERATIONS) {
+      throw new Error("Server busy generating art. Please try again in a moment.");
+    }
+
     const name = sanitizeInput(authorName ?? "").clean.slice(0, 50) || "Anonymous";
     const id = crypto.randomUUID();
 
@@ -153,8 +170,20 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
   async generateArt(payload: { id: string; text: string }) {
     const { id, text } = payload;
+    this.pendingGenerations++;
     try {
-      // Step 1: Content moderation via LLM
+      // Step 1a: Fast regex pre-filter for obvious profanity/slurs
+      if (preFilterContent(text)) {
+        this.sql`UPDATE graffiti SET
+          status = 'failed',
+          error_message = 'Content flagged by moderation'
+          WHERE id = ${id}`;
+        const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
+        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+        return;
+      }
+
+      // Step 1b: LLM-based content moderation (default-unsafe: only explicit "SAFE" passes)
       const moderationResponse = (await this.env.AI.run(
         "@cf/meta/llama-3.1-8b-instruct" as any,
         {
@@ -170,8 +199,9 @@ export class GraffitiWall extends Agent<Env, WallState> {
         }
       )) as { response?: string };
 
+      // Default-unsafe: content must be explicitly marked SAFE to pass
       const verdict = moderationResponse.response?.trim().toUpperCase();
-      if (verdict?.includes("UNSAFE")) {
+      if (!verdict?.includes("SAFE") || verdict?.includes("UNSAFE")) {
         this.sql`UPDATE graffiti SET
           status = 'failed',
           error_message = 'Content flagged by moderation'
@@ -197,7 +227,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
         }
       )) as { response?: string };
 
-      const artPrompt = llmResponse.response?.trim() || `Street art mural of: ${text}`;
+      const artPrompt = (llmResponse.response?.trim() || `Street art mural of: ${text}`).slice(0, 500);
 
       // Step 3: Generate image with Flux
       const imageResponse = await this.env.AI.run(
@@ -221,7 +251,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
     } catch (err) {
       console.error("generateArt failed:", err);
-      const errorMessage = err instanceof Error ? err.message : "Generation failed";
+      const errorMessage = (err instanceof Error ? err.message : "Generation failed").slice(0, 500);
       this.sql`UPDATE graffiti SET
         status = 'failed',
         error_message = ${errorMessage}
@@ -229,6 +259,8 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
       this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+    } finally {
+      this.pendingGenerations--;
     }
   }
 }
