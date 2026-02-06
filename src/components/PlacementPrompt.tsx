@@ -11,25 +11,26 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [positioned, setPositioned] = useState(false);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
+    // Wait one frame so the form is laid out (but invisible), then measure + clamp
     requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      // Measure form and clamp within parent bounds
       const el = formRef.current;
       const parent = el?.parentElement;
-      if (!el || !parent) return;
-      const pr = parent.getBoundingClientRect();
-      const er = el.getBoundingClientRect();
-      let dx = 0;
-      let dy = -er.height - 12; // 12px gap above click point
-      // Clamp: don't overflow top
-      if (er.top + dy < pr.top) dy = 12; // flip below click point
-      // Clamp: don't overflow left/right
-      if (er.left + dx - er.width / 2 < pr.left) dx = er.width / 2 - (er.left - pr.left);
-      if (er.left + dx + er.width / 2 > pr.right) dx = -(er.left + er.width / 2 - pr.right);
-      setOffset({ x: dx, y: dy });
+      if (el && parent) {
+        const pr = parent.getBoundingClientRect();
+        const er = el.getBoundingClientRect();
+        let dx = 0;
+        let dy = -er.height - 12; // 12px above click
+        if (er.top + dy < pr.top) dy = 12; // flip below if near top
+        if (er.left - er.width / 2 < pr.left) dx = er.width / 2 - (er.left - pr.left);
+        if (er.left + er.width / 2 > pr.right) dx = -(er.left + er.width / 2 - pr.right);
+        setOffset({ x: dx, y: dy });
+      }
+      setPositioned(true);
+      inputRef.current?.focus();
     });
   }, []);
 
@@ -50,7 +51,7 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
   return (
     <div
       ref={formRef}
-      className="absolute z-30 animate-fade-in"
+      className={`absolute z-30 ${positioned ? "animate-fade-in" : "opacity-0"}`}
       style={{
         left: `${pos.x * 100}%`,
         top: `${pos.y * 100}%`,
@@ -79,14 +80,14 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
           disabled={isSubmitting}
           className="px-3 py-1.5 text-zinc-400 hover:text-white text-sm transition-colors"
         >
-          Cancel
+          Bail
         </button>
         <button
           type="submit"
           disabled={!text.trim() || isSubmitting}
           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
         >
-          {isSubmitting ? "Spraying..." : "Spray"}
+          {isSubmitting ? "Bombing..." : "Bomb it"}
         </button>
       </form>
     </div>
