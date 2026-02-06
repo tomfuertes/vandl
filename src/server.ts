@@ -456,13 +456,20 @@ export class GraffitiWall extends Agent<Env, WallState> {
     try {
       const epoch = (this.state.wallEpoch ?? 0) + 1;
 
-      const surfaces = [
-        "red brick", "concrete", "corrugated metal", "cinderblock",
-        "stucco", "plywood", "stone", "whitewashed cement",
-        "steel panel", "adobe", "subway tile", "sandstone",
+      const walls = [
+        "large blank red brick building wall with a sidewalk in front",
+        "empty concrete side of a warehouse, a strip of pavement at the bottom",
+        "plain cinderblock wall of a school building, grass below",
+        "whitewashed side of a building on a quiet street",
+        "big blank stucco wall of an apartment building, narrow sidewalk below",
+        "flat plywood construction hoarding along a city street",
+        "painted-over side of a corner store, cracked sidewalk",
+        "bare concrete retaining wall along a road",
+        "blank stone wall of an old factory, weeds at the base",
+        "clean side of a parking garage, asphalt below",
       ];
-      const surface = surfaces[Math.floor(Math.random() * surfaces.length)];
-      const seed = `close-up macro photograph of a ${surface} wall, surface fills the entire frame edge to edge, no sky, no ground, no horizon, no objects, flat texture, diffuse lighting, architectural material photography`;
+      const wall = walls[Math.floor(Math.random() * walls.length)];
+      const seed = `street photography, ${wall}, straight-on view, daytime, no people, no graffiti, no text, the wall takes up most of the frame`;
 
       const imageResponse = await this.env.AI.run(
         "@cf/black-forest-labs/flux-1-schnell" as any,
@@ -472,7 +479,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       const bgId = crypto.randomUUID();
       this.sql`INSERT INTO wall_backgrounds (id, image_data, seed_words)
-               VALUES (${bgId}, ${bgImage}, ${surface})`;
+               VALUES (${bgId}, ${bgImage}, ${wall})`;
 
       // Snapshot current epoch
       const pieceCount = this.sql<{ count: number }>`
