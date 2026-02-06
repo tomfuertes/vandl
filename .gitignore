@@ -5,6 +5,7 @@ dist/
 *.local
 .env
 .env.*
+!.env.example
 .DS_Store
 
 # Local overrides (e.g., settings.local.json for machine-specific config)
