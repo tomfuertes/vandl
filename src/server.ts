@@ -331,8 +331,10 @@ const ALLOWED_INSTANCE_NAMES = new Set(["wall"]);
 
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
-    // data: for base64 AI art, wss: for DO WebSocket, unsafe-inline for Tailwind/Vite styles
-    "default-src 'self'; img-src 'self' data:; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'",
+    // data: for base64 AI art, unsafe-inline for Tailwind/Vite styles
+    // 'self' covers same-origin wss: in CSP Level 3 (w3c/webappsec-csp#7, Firefox bug 1345615)
+    // — no need for blanket wss: which would allow connections to ANY WebSocket origin
+    "default-src 'self'; img-src 'self' data:; connect-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
 } as const;

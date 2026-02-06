@@ -15,30 +15,33 @@ export function useWall() {
       setTotalPieces(state.totalPieces);
     },
     onMessage: (event: MessageEvent) => {
+      let msg: WallMessage;
+      // Parse only — catch is intentionally narrow so runtime errors in the
+      // switch handlers below surface instead of being silently swallowed (#15)
       try {
-        const msg: WallMessage = JSON.parse(event.data);
-
-        switch (msg.type) {
-          case "wall_history":
-            if (!hasLoadedHistory.current) {
-              setPieces(msg.pieces);
-              setTotalPieces(msg.total);
-              hasLoadedHistory.current = true;
-            }
-            break;
-
-          case "piece_added":
-            setPieces((prev) => [...prev, msg.piece]);
-            break;
-
-          case "piece_updated":
-            setPieces((prev) =>
-              prev.map((p) => (p.id === msg.piece.id ? msg.piece : p))
-            );
-            break;
-        }
+        msg = JSON.parse(event.data);
       } catch {
-        // Ignore non-JSON messages (state sync, identity, etc.)
+        return; // Non-JSON message (Agents SDK state sync, identity, etc.)
+      }
+
+      switch (msg.type) {
+        case "wall_history":
+          if (!hasLoadedHistory.current) {
+            setPieces(msg.pieces);
+            setTotalPieces(msg.total);
+            hasLoadedHistory.current = true;
+          }
+          break;
+
+        case "piece_added":
+          setPieces((prev) => [...prev, msg.piece]);
+          break;
+
+        case "piece_updated":
+          setPieces((prev) =>
+            prev.map((p) => (p.id === msg.piece.id ? msg.piece : p))
+          );
+          break;
       }
     },
   });
