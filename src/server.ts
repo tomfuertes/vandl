@@ -157,6 +157,11 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.scheduleEvery(3600, "rotateWall" as any);
     }
 
+    // Generate initial background if none exists yet
+    if (!bgRow) {
+      this.schedule(0, "rotateWall" as any);
+    }
+
     // Mark methods as callable for RPC from useAgent().call()
     registerCallable(this.contribute, { kind: "method", name: "contribute" } as any);
     registerCallable(this.getHistory, { kind: "method", name: "getHistory" } as any);
