@@ -3,6 +3,8 @@ import { Header } from "./Header";
 import { GraffitiCard } from "./GraffitiCard";
 import { ContributeForm } from "./ContributeForm";
 
+const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
+
 export function Wall() {
   const { pieces, contribute, isSubmitting, totalPieces } = useWall();
 
@@ -27,7 +29,11 @@ export function Wall() {
         )}
       </main>
 
-      <ContributeForm onSubmit={contribute} isSubmitting={isSubmitting} />
+      <ContributeForm
+        onSubmit={contribute}
+        isSubmitting={isSubmitting}
+        turnstileSiteKey={turnstileSiteKey}
+      />
     </div>
   );
 }

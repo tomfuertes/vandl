@@ -1,15 +1,71 @@
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
 
-interface ContributeFormProps {
-  onSubmit: (text: string, authorName?: string) => Promise<void>;
-  isSubmitting: boolean;
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (
+        container: string | HTMLElement,
+        options: {
+          sitekey: string;
+          callback: (token: string) => void;
+          "error-callback"?: () => void;
+          "expired-callback"?: () => void;
+          size?: "invisible" | "normal" | "compact";
+        }
+      ) => string;
+      reset: (widgetId: string) => void;
+      remove: (widgetId: string) => void;
+    };
+  }
 }
 
-export function ContributeForm({ onSubmit, isSubmitting }: ContributeFormProps) {
+interface ContributeFormProps {
+  onSubmit: (text: string, authorName?: string, turnstileToken?: string) => Promise<void>;
+  isSubmitting: boolean;
+  turnstileSiteKey?: string;
+}
+
+export function ContributeForm({ onSubmit, isSubmitting, turnstileSiteKey }: ContributeFormProps) {
   const [text, setText] = useState("");
   const [authorName, setAuthorName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const lastSubmitRef = useRef(0);
+  const tokenRef = useRef<string | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const renderWidget = useCallback(() => {
+    if (!turnstileSiteKey || !window.turnstile || !containerRef.current) return;
+    // Remove previous widget if exists
+    if (widgetIdRef.current) {
+      try { window.turnstile.remove(widgetIdRef.current); } catch {}
+      widgetIdRef.current = null;
+    }
+    tokenRef.current = null;
+    widgetIdRef.current = window.turnstile.render(containerRef.current, {
+      sitekey: turnstileSiteKey,
+      size: "invisible",
+      callback: (token: string) => { tokenRef.current = token; },
+      "error-callback": () => { tokenRef.current = null; },
+      "expired-callback": () => { tokenRef.current = null; },
+    });
+  }, [turnstileSiteKey]);
+
+  useEffect(() => {
+    // Turnstile script loads async — poll briefly if not ready yet
+    if (!turnstileSiteKey) return;
+    if (window.turnstile) {
+      renderWidget();
+      return;
+    }
+    const interval = setInterval(() => {
+      if (window.turnstile) {
+        clearInterval(interval);
+        renderWidget();
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [turnstileSiteKey, renderWidget]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -26,10 +82,20 @@ export function ContributeForm({ onSubmit, isSubmitting }: ContributeFormProps) 
     lastSubmitRef.current = now;
 
     try {
-      await onSubmit(text, authorName || undefined);
+      await onSubmit(text, authorName || undefined, tokenRef.current ?? undefined);
       setText("");
+      // Reset widget to get a fresh token for next submission
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(widgetIdRef.current);
+        tokenRef.current = null;
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      // Reset widget on error too so user can retry
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(widgetIdRef.current);
+        tokenRef.current = null;
+      }
     }
   };
 
@@ -69,6 +135,8 @@ export function ContributeForm({ onSubmit, isSubmitting }: ContributeFormProps) 
             {isSubmitting ? "Spraying..." : "Spray it"}
           </button>
         </div>
+        {/* Invisible Turnstile widget container */}
+        <div ref={containerRef} />
       </div>
     </form>
   );
