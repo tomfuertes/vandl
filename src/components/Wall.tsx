@@ -3,10 +3,8 @@ import { Header } from "./Header";
 import { GraffitiCard } from "./GraffitiCard";
 import { ContributeForm } from "./ContributeForm";
 
-const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
-
 export function Wall() {
-  const { pieces, contribute, isSubmitting, totalPieces } = useWall();
+  const { pieces, contribute, isSubmitting, totalPieces, turnstileSiteKey } = useWall();
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
