@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.vite/
+*.local
+.env
+.env.*
+.DS_Store
+
+# Local overrides (e.g., settings.local.json for machine-specific config)
+*.local.*
