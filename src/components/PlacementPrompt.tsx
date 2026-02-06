@@ -80,14 +80,14 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
           disabled={isSubmitting}
           className="px-3 py-1.5 text-zinc-400 hover:text-white text-sm transition-colors"
         >
-          Bail
+          Nah
         </button>
         <button
           type="submit"
           disabled={!text.trim() || isSubmitting}
           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
         >
-          {isSubmitting ? "Bombing..." : "Bomb it"}
+          {isSubmitting ? "Tagging..." : "Tag it"}
         </button>
       </form>
     </div>

@@ -40,7 +40,7 @@ body {
 }
 
 .cursor-spray {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect x='10' y='14' width='12' height='16' rx='2' fill='%239333ea'/%3E%3Crect x='12' y='12' width='8' height='4' rx='1' fill='%23a855f7'/%3E%3Ccircle cx='16' cy='22' r='3' fill='%23d8b4fe'/%3E%3Crect x='14' y='8' width='4' height='5' rx='1' fill='%23a1a1aa'/%3E%3Ccircle cx='16' cy='6' r='2' fill='%23d4d4d8' opacity='0.6'/%3E%3Ccircle cx='12' cy='4' r='1.5' fill='%23d4d4d8' opacity='0.4'/%3E%3Ccircle cx='20' cy='5' r='1' fill='%23d4d4d8' opacity='0.3'/%3E%3C/svg%3E") 16 28, crosshair;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Crect x='12' y='18' width='16' height='20' rx='3' fill='%23d4d4d4' stroke='%23999' stroke-width='0.5'/%3E%3Crect x='14' y='16' width='12' height='4' rx='1.5' fill='%23bbb'/%3E%3Crect x='17' y='10' width='6' height='7' rx='1.5' fill='%23999'/%3E%3Ccircle cx='20' cy='28' r='4' fill='none' stroke='%23aaa' stroke-width='0.7'/%3E%3Cline x1='16' y1='22' x2='24' y2='22' stroke='%23bbb' stroke-width='0.5'/%3E%3Crect x='14' y='32' width='3' height='1' rx='0.5' fill='%23aaa' opacity='0.5'/%3E%3Crect x='22' y='25' width='2' height='1' rx='0.5' fill='%23ccc' opacity='0.4'/%3E%3Ccircle cx='20' cy='7' r='2.5' fill='%23e5e5e5' opacity='0.5'/%3E%3Ccircle cx='14' cy='5' r='1.5' fill='%23e5e5e5' opacity='0.3'/%3E%3Ccircle cx='26' cy='6' r='1' fill='%23e5e5e5' opacity='0.25'/%3E%3C/svg%3E") 20 36, crosshair;
 }
 
 @media (pointer: coarse) {

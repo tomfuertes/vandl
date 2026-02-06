@@ -113,7 +113,7 @@ export function Wall() {
         {pieces.length === 0 && !promptPos && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-white/20 text-2xl font-black uppercase tracking-widest select-none">
-              Fresh wall — click to bomb
+              Fresh wall — click to tag
             </p>
           </div>
         )}
