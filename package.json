@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "npm install --prefer-offline && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "deploy": "wrangler deploy"
   },
@@ -24,5 +24,8 @@
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "wrangler": "^4.63.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "^4.0.0"
   }
 }
