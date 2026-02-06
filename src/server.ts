@@ -43,8 +43,13 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 export class GraffitiWall extends Agent<Env, WallState> {
   initialState: WallState = { totalPieces: 0 };
 
-  private connectionCount = 0;
   private readonly MAX_CONNECTIONS = 100;
+
+  private getConnectionCount(): number {
+    let count = 0;
+    for (const _ of this.getConnections()) count++;
+    return count;
+  }
 
   onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS graffiti (
@@ -81,38 +86,66 @@ export class GraffitiWall extends Agent<Env, WallState> {
     return request?.headers.get("CF-Connecting-IP") ?? "unknown-ip";
   }
 
-  /** SQLite-backed rate limit check. Returns error message or null. */
+  /**
+   * SQLite-backed sliding-window rate limiter. Records a timestamp on success
+   * and returns null. Returns an error message if over the limit. Fails open
+   * (allows the request) if SQLite or JSON parsing errors occur.
+   */
   private checkRateLimit(key: string, limit: number): string | null {
-    const now = Date.now();
-    const windowStart = now - RATE_LIMIT_WINDOW_MS;
+    try {
+      const now = Date.now();
+      const windowStart = now - RATE_LIMIT_WINDOW_MS;
 
-    const row = this.sql<{ timestamps: string }>`
-      SELECT timestamps FROM rate_limits WHERE key = ${key}
-    `[0];
+      const row = this.sql<{ timestamps: string }>`
+        SELECT timestamps FROM rate_limits WHERE key = ${key}
+      `[0];
 
-    let timestamps: number[] = row ? JSON.parse(row.timestamps) : [];
-    timestamps = timestamps.filter((t) => t > windowStart);
+      let timestamps: number[];
+      if (row) {
+        try {
+          const parsed = JSON.parse(row.timestamps);
+          timestamps = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          console.error(`Corrupted rate_limits row for key="${key}", resetting`);
+          this.sql`DELETE FROM rate_limits WHERE key = ${key}`;
+          timestamps = [];
+        }
+      } else {
+        timestamps = [];
+      }
 
-    if (timestamps.length >= limit) {
-      const retryIn = Math.ceil((timestamps[0] + RATE_LIMIT_WINDOW_MS - now) / 1000);
-      return `Rate limited. Try again in ${retryIn}s`;
+      timestamps = timestamps.filter((t) => t > windowStart);
+
+      if (timestamps.length >= limit) {
+        const retryIn = Math.ceil((timestamps[0] + RATE_LIMIT_WINDOW_MS - now) / 1000);
+        // Write back pruned timestamps
+        this.sql`INSERT OR REPLACE INTO rate_limits (key, timestamps)
+          VALUES (${key}, ${JSON.stringify(timestamps)})`;
+        return `Rate limited. Try again in ${retryIn}s`;
+      }
+
+      if (timestamps.length === 0 && row) {
+        // Clean up stale rows with no active timestamps
+        this.sql`DELETE FROM rate_limits WHERE key = ${key}`;
+      }
+
+      timestamps.push(now);
+      this.sql`INSERT OR REPLACE INTO rate_limits (key, timestamps)
+        VALUES (${key}, ${JSON.stringify(timestamps)})`;
+      return null;
+    } catch (err) {
+      console.error(`Rate limiter error for key="${key}":`, err);
+      return null; // Fail open: allow the request
     }
-
-    timestamps.push(now);
-    this.sql`INSERT OR REPLACE INTO rate_limits (key, timestamps)
-      VALUES (${key}, ${JSON.stringify(timestamps)})`;
-    return null;
   }
 
   onConnect(connection: Connection, ctx: ConnectionContext) {
-    // Enforce connection cap
-    if (this.connectionCount >= this.MAX_CONNECTIONS) {
+    if (this.getConnectionCount() >= this.MAX_CONNECTIONS) {
       connection.close(1013, "Too many connections");
       return;
     }
-    this.connectionCount++;
 
-    // Capture client IP for rate limiting
+    // Store client IP so getClientIp() can retrieve it during WS message handling
     const ip = ctx.request.headers.get("CF-Connecting-IP") ?? "unknown-ip";
     connection.setState({ ip });
 
@@ -128,17 +161,13 @@ export class GraffitiWall extends Agent<Env, WallState> {
     connection.send(JSON.stringify(msg));
   }
 
-  onClose() {
-    this.connectionCount = Math.max(0, this.connectionCount - 1);
-  }
-
   async contribute(text: string, authorName?: string) {
-    // Rate limit: per-IP + global writes
+    // Rate limit: check global first (avoids burning per-IP slot on global rejection)
+    const globalError = this.checkRateLimit("global:write", RATE_LIMIT_GLOBAL_WRITE);
+    if (globalError) throw new Error("The wall is busy. Try again in a moment.");
     const ip = this.getClientIp();
     const perIpError = this.checkRateLimit(`ip:write:${ip}`, RATE_LIMIT_PER_IP_WRITE);
     if (perIpError) throw new Error(perIpError);
-    const globalError = this.checkRateLimit("global:write", RATE_LIMIT_GLOBAL_WRITE);
-    if (globalError) throw new Error("The wall is busy. Try again in a moment.");
 
     // Input sanitization
     const { clean: cleanText, rejected } = sanitizeInput(text);
