@@ -456,14 +456,13 @@ export class GraffitiWall extends Agent<Env, WallState> {
     try {
       const epoch = (this.state.wallEpoch ?? 0) + 1;
 
-      const themes = [
-        "weathered red brick", "cracked concrete", "rusted corrugated metal",
-        "painted cinderblock", "stucco with peeling paint", "plywood construction hoarding",
-        "mossy stone", "whitewashed cement", "industrial steel panels",
-        "sun-bleached adobe", "tiled subway wall", "rough sandstone",
+      const surfaces = [
+        "red brick", "concrete", "corrugated metal", "cinderblock",
+        "stucco", "plywood", "stone", "whitewashed cement",
+        "steel panel", "adobe", "subway tile", "sandstone",
       ];
-      const theme = themes[Math.floor(Math.random() * themes.length)];
-      const seed = `${theme} wall surface, flat front view, head-on photograph, blank clean wall, no graffiti, no text, no people, no perspective, texture fill, even lighting`;
+      const surface = surfaces[Math.floor(Math.random() * surfaces.length)];
+      const seed = `close-up macro photograph of a ${surface} wall, surface fills the entire frame edge to edge, no sky, no ground, no horizon, no objects, flat texture, diffuse lighting, architectural material photography`;
 
       const imageResponse = await this.env.AI.run(
         "@cf/black-forest-labs/flux-1-schnell" as any,
@@ -473,7 +472,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       const bgId = crypto.randomUUID();
       this.sql`INSERT INTO wall_backgrounds (id, image_data, seed_words)
-               VALUES (${bgId}, ${bgImage}, ${theme})`;
+               VALUES (${bgId}, ${bgImage}, ${surface})`;
 
       // Snapshot current epoch
       const pieceCount = this.sql<{ count: number }>`
