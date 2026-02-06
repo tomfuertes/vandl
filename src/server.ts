@@ -17,6 +17,17 @@ const RATE_LIMIT_PER_IP_WRITE = 3; // per IP per minute (writes)
 const RATE_LIMIT_GLOBAL_WRITE = 30; // total across all IPs per minute (writes)
 const RATE_LIMIT_PER_IP_READ = 30; // per IP per minute (reads)
 
+// --- Content pre-filter (fast blocklist before LLM moderation) ---
+// Encoded to keep slurs out of source. Decoded once at module load.
+const PROFANITY_RE = new RegExp(
+  atob("XGIobmlnZyg/OmVyfGEpfGZhZyg/OmdvdCk/fHJldGFyZHxraWtlfHNwaWN8Y2hpbmt8dHJhbm55fGN1bnR8Y29ja1xzKnN1Y2t8Ymxvd1xzKmpvYnxnYW5nXHMqYmFuZ3xjaGlsZFxzKnBvcm58a2lkZGllXHMqcG9ybnxraWxsXHMqKD86eW91cik/c2VsZilcYg=="),
+  "i"
+);
+
+function containsProfanity(text: string): boolean {
+  return PROFANITY_RE.test(text);
+}
+
 // --- Input sanitization ---
 const HTML_TAG_RE = /<[^>]*>/g;
 const SCRIPT_RE = /javascript:|on\w+\s*=|<script|<iframe|<object|<embed/i;
@@ -42,6 +53,10 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 
 export class GraffitiWall extends Agent<Env, WallState> {
   initialState: WallState = { totalPieces: 0 };
+
+  // Concurrency limit for AI generation pipelines
+  private pendingGenerations = 0;
+  private readonly MAX_CONCURRENT_GENERATIONS = 3;
 
   private readonly MAX_CONNECTIONS = 100;
 
@@ -175,6 +190,11 @@ export class GraffitiWall extends Agent<Env, WallState> {
       throw new Error(rejected);
     }
 
+    // Backpressure: reject before inserting if too many AI pipelines are in-flight
+    if (this.pendingGenerations >= this.MAX_CONCURRENT_GENERATIONS) {
+      throw new Error("Server busy generating art. Please try again in a moment.");
+    }
+
     const name = sanitizeInput(authorName ?? "").clean.slice(0, 50) || "Anonymous";
     const id = crypto.randomUUID();
 
@@ -185,7 +205,8 @@ export class GraffitiWall extends Agent<Env, WallState> {
     this.setState({ totalPieces: this.state.totalPieces + 1 });
     this.broadcast(JSON.stringify({ type: "piece_added", piece } satisfies WallMessage));
 
-    // Schedule immediate background art generation (includes content moderation)
+    // Acquire semaphore slot synchronously with the check (avoids TOCTOU race)
+    this.pendingGenerations++;
     this.schedule(0, "generateArt", { id, text: cleanText });
 
     return { id };
@@ -208,10 +229,31 @@ export class GraffitiWall extends Agent<Env, WallState> {
     return { pieces: pieces.reverse(), total: this.state.totalPieces };
   }
 
+  private failPiece(id: string, errorMessage: string) {
+    try {
+      this.sql`UPDATE graffiti SET
+        status = 'failed',
+        error_message = ${errorMessage.slice(0, 500)}
+        WHERE id = ${id}`;
+      const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
+      if (piece) {
+        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+      }
+    } catch (recoverErr) {
+      console.error("Failed to record error state for piece", id, ":", recoverErr);
+    }
+  }
+
   async generateArt(payload: { id: string; text: string }) {
     const { id, text } = payload;
     try {
-      // Step 1: Content moderation via LLM
+      // Step 1a: Fast regex pre-filter for obvious profanity/slurs
+      if (containsProfanity(text)) {
+        this.failPiece(id, "Content flagged by moderation");
+        return;
+      }
+
+      // Step 1b: LLM-based content moderation (default-unsafe: only exact "SAFE" passes)
       const moderationResponse = (await this.env.AI.run(
         "@cf/meta/llama-3.1-8b-instruct" as any,
         {
@@ -228,13 +270,8 @@ export class GraffitiWall extends Agent<Env, WallState> {
       )) as { response?: string };
 
       const verdict = moderationResponse.response?.trim().toUpperCase();
-      if (verdict?.includes("UNSAFE")) {
-        this.sql`UPDATE graffiti SET
-          status = 'failed',
-          error_message = 'Content flagged by moderation'
-          WHERE id = ${id}`;
-        const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
-        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+      if (verdict !== "SAFE") {
+        this.failPiece(id, "Content flagged by moderation");
         return;
       }
 
@@ -254,7 +291,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
         }
       )) as { response?: string };
 
-      const artPrompt = llmResponse.response?.trim() || `Street art mural of: ${text}`;
+      const artPrompt = (llmResponse.response?.trim() || `Street art mural of: ${text}`).slice(0, 500);
 
       // Step 3: Generate image with Flux
       const imageResponse = await this.env.AI.run(
@@ -274,18 +311,17 @@ export class GraffitiWall extends Agent<Env, WallState> {
         completed_at = datetime('now')
         WHERE id = ${id}`;
 
-      const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
-      this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+      try {
+        const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
+        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+      } catch (broadcastErr) {
+        console.error("Broadcast failed after successful generation for piece", id, ":", broadcastErr);
+      }
     } catch (err) {
       console.error("generateArt failed:", err);
-      const errorMessage = err instanceof Error ? err.message : "Generation failed";
-      this.sql`UPDATE graffiti SET
-        status = 'failed',
-        error_message = ${errorMessage}
-        WHERE id = ${id}`;
-
-      const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
-      this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+      this.failPiece(id, err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      this.pendingGenerations = Math.max(0, this.pendingGenerations - 1);
     }
   }
 }

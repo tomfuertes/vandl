@@ -44,12 +44,23 @@
 - **Stale row cleanup** happens inline: when all timestamps in a row have expired, the row is deleted during the next check. No scheduled job needed.
 - **Check order matters** in `contribute()`: global limit first (30/min), then per-IP (3/min). Avoids burning a scarce per-IP slot when the global limit rejects.
 
-## Architecture
+## Architecture — `src/server.ts`
 
-- Single Durable Object: `GraffitiWall` — handles WS connections, rate limiting, art generation.
-- SQLite tables: `graffiti` (content), `rate_limits` (sliding-window counters).
-- Art pipeline: `contribute()` → `schedule(0, "generateArt")` → Llama moderation → Llama prompt crafting → Flux image gen → broadcast update.
+- **Single Durable Object class `GraffitiWall`** handles all state: SQLite for persistence, WebSocket broadcast for real-time updates, and `schedule()` for background AI work.
+- **SQLite tables**: `graffiti` (content), `rate_limits` (sliding-window counters).
+- **`contribute()` → `schedule(0, "generateArt")`** pipeline: contribute does validation/insert/broadcast synchronously, then defers the 3-step AI pipeline (moderation → prompt gen → image gen) to a scheduled method.
+- **Concurrency semaphore** (`pendingGenerations`): incremented in `contribute()` (same synchronous frame as the check), decremented in `generateArt()`'s `finally`. In-memory only — resets on DO eviction. Keep check-and-acquire atomic to avoid TOCTOU races with `schedule()`.
+- **Connection limit** (`MAX_CONNECTIONS`): enforced in `onConnect()` using `getConnections()` iterable count. Rejects with WebSocket close code 1013.
+- **`failPiece(id, message)`** helper: centralizes the fail-update-broadcast pattern with its own try-catch so SQL/broadcast errors never propagate and hide the original error.
+- **Content moderation is two layers**: (1) base64-encoded regex blocklist for obvious terms (no AI cost), (2) Llama LLM check with strict `verdict !== "SAFE"` equality (default-unsafe — anything other than exact "SAFE" is rejected).
+- **Field truncation**: `artPrompt` and `errorMessage` are `.slice(0, 500)` before SQLite storage (done inside `failPiece` and inline for artPrompt).
 - All real-time updates via `this.broadcast()` to connected WS clients.
+
+## Patterns & Conventions
+
+- **Profanity/blocklist regex** is base64-encoded at module scope to keep slurs out of source. Decoded once via `atob()` at module load.
+- **LLM response parsing**: always treat LLM output as untrusted — truncate, trim, and use strict equality rather than substring matching for classification responses.
+- **Error handling in `generateArt`**: success-path broadcast is wrapped in its own try-catch so a broadcast failure doesn't overwrite a successful DB update with a failure status.
 
 ## Node / Tooling
 
