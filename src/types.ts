@@ -15,6 +15,6 @@ export interface WallState {
 }
 
 export type WallMessage =
-  | { type: "wall_history"; pieces: GraffitiPiece[]; total: number }
+  | { type: "wall_history"; pieces: GraffitiPiece[]; total: number; turnstileSiteKey?: string }
   | { type: "piece_added"; piece: GraffitiPiece }
   | { type: "piece_updated"; piece: GraffitiPiece };

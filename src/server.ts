@@ -6,6 +6,7 @@ interface Env {
   AI: Ai;
   GRAFFITI_WALL: DurableObjectNamespace;
   TURNSTILE_SECRET: string;
+  TURNSTILE_SITE_KEY: string;
 }
 
 // Register methods as callable imperatively (TC39 decorators
@@ -104,6 +105,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
   /** Verify a Turnstile token against Cloudflare's siteverify endpoint. */
   private async verifyTurnstile(token: string | undefined) {
+    if (!this.env.TURNSTILE_SECRET) return;
     if (!token) {
       throw new Error("Bot verification required.");
     }
@@ -197,6 +199,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
       type: "wall_history",
       pieces: pieces.reverse(),
       total: this.state.totalPieces,
+      turnstileSiteKey: this.env.TURNSTILE_SITE_KEY || undefined,
     };
     connection.send(JSON.stringify(msg));
   }
@@ -363,7 +366,7 @@ const SECURITY_HEADERS = {
     // 'self' covers same-origin wss: in CSP Level 3 (w3c/webappsec-csp#7, Firefox bug 1345615)
     // — no need for blanket wss: which would allow connections to ANY WebSocket origin
     // challenges.cloudflare.com: Turnstile bot verification (script + iframe)
-    "default-src 'self'; img-src 'self' data:; connect-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; frame-src https://challenges.cloudflare.com",
+    "default-src 'self'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; frame-src https://challenges.cloudflare.com",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
 } as const;

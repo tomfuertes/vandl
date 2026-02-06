@@ -6,6 +6,7 @@ export function useWall() {
   const [pieces, setPieces] = useState<GraffitiPiece[]>([]);
   const [totalPieces, setTotalPieces] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | undefined>();
   const hasLoadedHistory = useRef(false);
 
   const agent = useAgent<WallState>({
@@ -29,6 +30,7 @@ export function useWall() {
           if (!hasLoadedHistory.current) {
             setPieces(msg.pieces);
             setTotalPieces(msg.total);
+            setTurnstileSiteKey(msg.turnstileSiteKey);
             hasLoadedHistory.current = true;
           }
           break;
@@ -74,5 +76,6 @@ export function useWall() {
     loadMore,
     isSubmitting,
     totalPieces,
+    turnstileSiteKey,
   };
 }
