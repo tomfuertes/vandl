@@ -1,6 +1,6 @@
 import { Agent, callable, routeAgentRequest, getCurrentAgent } from "agents";
 import type { Connection, ConnectionContext } from "agents";
-import type { GraffitiPiece, WallState, WallMessage } from "./types";
+import type { GraffitiPiece, WallState, WallMessage, CursorPosition } from "./types";
 
 interface Env {
   AI: Ai;
@@ -54,13 +54,16 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 }
 
 export class GraffitiWall extends Agent<Env, WallState> {
-  initialState: WallState = { totalPieces: 0 };
+  initialState: WallState = { totalPieces: 0, backgroundImage: null, wallEpoch: 0 };
 
   // Concurrency limit for AI generation pipelines
   private pendingGenerations = 0;
   private readonly MAX_CONCURRENT_GENERATIONS = 3;
 
   private readonly MAX_CONNECTIONS = 100;
+
+  // 10Hz cursor broadcast interval (ephemeral — resets on DO eviction)
+  private cursorBroadcastInterval: ReturnType<typeof setInterval> | null = null;
 
   private getConnectionCount(): number {
     let count = 0;
@@ -82,13 +85,82 @@ export class GraffitiWall extends Agent<Env, WallState> {
     )`;
     this.sql`CREATE INDEX IF NOT EXISTS idx_graffiti_created_at ON graffiti(created_at DESC)`;
 
+    // Spatial canvas columns (idempotent migration)
+    try { this.sql`ALTER TABLE graffiti ADD COLUMN pos_x REAL NOT NULL DEFAULT 0.5`; } catch {}
+    try { this.sql`ALTER TABLE graffiti ADD COLUMN pos_y REAL NOT NULL DEFAULT 0.5`; } catch {}
+
     this.sql`CREATE TABLE IF NOT EXISTS rate_limits (
       key TEXT PRIMARY KEY,
       timestamps TEXT NOT NULL DEFAULT '[]'
     )`;
 
+    this.sql`CREATE TABLE IF NOT EXISTS wall_backgrounds (
+      id TEXT PRIMARY KEY,
+      image_data TEXT NOT NULL,
+      seed_words TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`;
+
+    this.sql`CREATE TABLE IF NOT EXISTS wall_snapshots (
+      id TEXT PRIMARY KEY,
+      epoch INTEGER NOT NULL,
+      piece_count INTEGER NOT NULL,
+      background_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`;
+
+    // Load persisted state
     const row = this.sql<{ count: number }>`SELECT COUNT(*) as count FROM graffiti`[0];
-    this.setState({ totalPieces: row?.count ?? 0 });
+    const epochRow = this.sql<{ epoch: number }>`
+      SELECT MAX(epoch) as epoch FROM wall_snapshots
+    `[0];
+    const bgRow = this.sql<{ image_data: string }>`
+      SELECT image_data FROM wall_backgrounds ORDER BY created_at DESC LIMIT 1
+    `[0];
+
+    this.setState({
+      totalPieces: row?.count ?? 0,
+      backgroundImage: bgRow?.image_data ?? null,
+      wallEpoch: epochRow?.epoch ?? 0,
+    });
+
+    // 10Hz cursor broadcast to all connected clients
+    this.cursorBroadcastInterval = setInterval(() => {
+      const cursors: CursorPosition[] = [];
+      for (const conn of this.getConnections()) {
+        const state = conn.state as {
+          cursorX?: number;
+          cursorY?: number;
+          cursorName?: string;
+        };
+        if (state?.cursorX !== undefined) {
+          cursors.push({
+            id: conn.id,
+            name: state.cursorName || "Anonymous",
+            x: state.cursorX,
+            y: state.cursorY!,
+          });
+        }
+      }
+      if (cursors.length > 0) {
+        this.broadcast(JSON.stringify({
+          type: "cursor_update",
+          cursors,
+        } satisfies WallMessage));
+      }
+    }, 100);
+
+    // Hourly wall rotation (idempotent — only register if not already scheduled)
+    const existing = this.getSchedules({ type: "interval" });
+    const hasRotation = existing.some((s: any) => s.callback === "rotateWall");
+    if (!hasRotation) {
+      this.scheduleEvery(3600, "rotateWall" as any);
+    }
+
+    // Generate initial background if none exists yet
+    if (!bgRow) {
+      this.schedule(0, "rotateWall" as any);
+    }
 
     // Mark methods as callable for RPC from useAgent().call()
     registerCallable(this.contribute, { kind: "method", name: "contribute" } as any);
@@ -181,6 +253,26 @@ export class GraffitiWall extends Agent<Env, WallState> {
     }
   }
 
+  onMessage(connection: Connection, message: string | ArrayBuffer) {
+    if (typeof message === "string" && message.startsWith("C:")) {
+      // Cursor update: "C:0.45,0.32,PlayerName"
+      const parts = message.slice(2).split(",");
+      const x = Math.max(0, Math.min(1, parseFloat(parts[0]) || 0));
+      const y = Math.max(0, Math.min(1, parseFloat(parts[1]) || 0));
+      const name = (parts.slice(2).join(",") || "Anonymous").slice(0, 50);
+
+      connection.setState({
+        ...(connection.state as Record<string, unknown>),
+        cursorX: x,
+        cursorY: y,
+        cursorName: name,
+      });
+      return; // Don't pass to SDK — cursor data is ephemeral
+    }
+
+    super.onMessage(connection, message);
+  }
+
   onConnect(connection: Connection, ctx: ConnectionContext) {
     if (this.getConnectionCount() >= this.MAX_CONNECTIONS) {
       connection.close(1013, "Too many connections");
@@ -192,7 +284,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
     connection.setState({ ip });
 
     const pieces = this.sql<GraffitiPiece>`
-      SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, created_at, completed_at
+      SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, pos_x, pos_y, created_at, completed_at
       FROM graffiti ORDER BY created_at DESC LIMIT 50
     `;
     const msg: WallMessage = {
@@ -200,11 +292,13 @@ export class GraffitiWall extends Agent<Env, WallState> {
       pieces: pieces.reverse(),
       total: this.state.totalPieces,
       turnstileSiteKey: this.env.TURNSTILE_SITE_KEY || undefined,
+      backgroundImage: this.state.backgroundImage,
+      wallEpoch: this.state.wallEpoch,
     };
     connection.send(JSON.stringify(msg));
   }
 
-  async contribute(text: string, authorName?: string, turnstileToken?: string) {
+  async contribute(text: string, authorName?: string, turnstileToken?: string, posX?: number, posY?: number) {
     // Turnstile bot verification (before rate limiting to avoid burning slots on bots)
     await this.verifyTurnstile(turnstileToken);
 
@@ -228,12 +322,14 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
     const name = sanitizeInput(authorName ?? "").clean.slice(0, 50) || "Anonymous";
     const id = crypto.randomUUID();
+    const x = Math.max(0, Math.min(1, Number(posX) || 0.5));
+    const y = Math.max(0, Math.min(1, Number(posY) || 0.5));
 
-    this.sql`INSERT INTO graffiti (id, author_name, original_text, status)
-      VALUES (${id}, ${name}, ${cleanText}, 'generating')`;
+    this.sql`INSERT INTO graffiti (id, author_name, original_text, status, pos_x, pos_y)
+      VALUES (${id}, ${name}, ${cleanText}, 'generating', ${x}, ${y})`;
 
     const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
-    this.setState({ totalPieces: this.state.totalPieces + 1 });
+    this.setState({ ...this.state, totalPieces: this.state.totalPieces + 1 });
     this.broadcast(JSON.stringify({ type: "piece_added", piece } satisfies WallMessage));
 
     // Acquire semaphore slot synchronously with the check (avoids TOCTOU race)
@@ -254,7 +350,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
     if (readError) throw new Error(readError);
 
     const pieces = this.sql<GraffitiPiece>`
-      SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, created_at, completed_at
+      SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, pos_x, pos_y, created_at, completed_at
       FROM graffiti ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
     `;
     return { pieces: pieces.reverse(), total: this.state.totalPieces };
@@ -353,6 +449,70 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.failPiece(id, err instanceof Error ? err.message : "Generation failed");
     } finally {
       this.pendingGenerations = Math.max(0, this.pendingGenerations - 1);
+    }
+  }
+
+  async rotateWall() {
+    try {
+      const epoch = (this.state.wallEpoch ?? 0) + 1;
+
+      const walls = [
+        "large blank red brick building wall with a sidewalk in front",
+        "empty concrete side of a warehouse, a strip of pavement at the bottom",
+        "plain cinderblock wall of a school building, grass below",
+        "whitewashed side of a building on a quiet street",
+        "big blank stucco wall of an apartment building, narrow sidewalk below",
+        "flat plywood construction hoarding along a city street",
+        "painted-over side of a corner store, cracked sidewalk",
+        "bare concrete retaining wall along a road",
+        "blank stone wall of an old factory, weeds at the base",
+        "clean side of a parking garage, asphalt below",
+      ];
+      const wall = walls[Math.floor(Math.random() * walls.length)];
+      const seed = `street photography, ${wall}, straight-on view, daytime, no people, no graffiti, no text, the wall takes up most of the frame`;
+
+      const imageResponse = await this.env.AI.run(
+        "@cf/black-forest-labs/flux-1-schnell" as any,
+        { prompt: seed, steps: 4 }
+      );
+      const bgImage = `data:image/png;base64,${(imageResponse as any).image}`;
+
+      const bgId = crypto.randomUUID();
+      this.sql`INSERT INTO wall_backgrounds (id, image_data, seed_words)
+               VALUES (${bgId}, ${bgImage}, ${wall})`;
+
+      // Snapshot current epoch
+      const pieceCount = this.sql<{ count: number }>`
+        SELECT COUNT(*) as count FROM graffiti
+        WHERE created_at > datetime('now', '-1 hour')
+      `[0]?.count ?? 0;
+
+      this.sql`INSERT INTO wall_snapshots (id, epoch, piece_count, background_id)
+               VALUES (${crypto.randomUUID()}, ${epoch}, ${pieceCount}, ${bgId})`;
+
+      this.setState({
+        ...this.state,
+        backgroundImage: bgImage,
+        wallEpoch: epoch,
+      });
+
+      this.broadcast(JSON.stringify({
+        type: "wall_rotated",
+        backgroundImage: bgImage,
+        wallEpoch: epoch,
+      } satisfies WallMessage));
+
+      // Cleanup: keep last 24 backgrounds
+      this.sql`DELETE FROM wall_backgrounds WHERE id NOT IN (
+        SELECT id FROM wall_backgrounds ORDER BY created_at DESC LIMIT 24
+      )`;
+
+      // Cleanup: keep last 500 pieces
+      this.sql`DELETE FROM graffiti WHERE id NOT IN (
+        SELECT id FROM graffiti ORDER BY created_at DESC LIMIT 500
+      )`;
+    } catch (err) {
+      console.error("rotateWall failed:", err);
     }
   }
 }
