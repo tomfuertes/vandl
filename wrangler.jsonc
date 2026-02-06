@@ -24,6 +24,9 @@
   "routes": [
     { "pattern": "vandl.tomfuertes.com", "custom_domain": true }
   ],
+  "vars": {
+    "TURNSTILE_SECRET_KEY": "0x4AAAAAACYgIEay44OQ3GdR"
+  },
   "observability": {
     "enabled": true
   }
