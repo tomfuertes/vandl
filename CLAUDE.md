@@ -62,6 +62,11 @@
 - **LLM response parsing**: always treat LLM output as untrusted — truncate, trim, and use strict equality rather than substring matching for classification responses.
 - **Error handling in `generateArt`**: success-path broadcast is wrapped in its own try-catch so a broadcast failure doesn't overwrite a successful DB update with a failure status.
 
+## Git Workflow
+
+- **Main branch is protected** — direct push is blocked. Always create a feature branch, push, and open a PR via `gh pr create`.
+- **Squash merge** — PRs are squash-merged into main. One commit per PR in the history.
+
 ## Node / Tooling
 
 - Node 22 required (`.node-version` file in root).
