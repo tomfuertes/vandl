@@ -1,5 +1,5 @@
 import { Agent, callable, routeAgentRequest, getCurrentAgent } from "agents";
-import type { Connection } from "agents";
+import type { Connection, ConnectionContext } from "agents";
 import type { GraffitiPiece, WallState, WallMessage } from "./types";
 
 interface Env {
@@ -13,39 +13,9 @@ const registerCallable = callable();
 
 // --- Rate limiting ---
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_PER_CONNECTION = 3; // per connection per minute
-const RATE_LIMIT_GLOBAL = 30; // total across all connections per minute
-const rateLimitMap = new Map<string, number[]>(); // connectionId -> timestamps
-const globalTimestamps: number[] = [];
-
-function checkRateLimit(connectionId: string): string | null {
-  const now = Date.now();
-
-  // Global rate limit
-  while (globalTimestamps.length && globalTimestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
-    globalTimestamps.shift();
-  }
-  if (globalTimestamps.length >= RATE_LIMIT_GLOBAL) {
-    return "The wall is busy. Try again in a moment.";
-  }
-
-  // Per-connection rate limit
-  let timestamps = rateLimitMap.get(connectionId);
-  if (!timestamps) {
-    timestamps = [];
-    rateLimitMap.set(connectionId, timestamps);
-  }
-  while (timestamps.length && timestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
-    timestamps.shift();
-  }
-  if (timestamps.length >= RATE_LIMIT_PER_CONNECTION) {
-    return "Slow down — max 3 per minute.";
-  }
-
-  timestamps.push(now);
-  globalTimestamps.push(now);
-  return null;
-}
+const RATE_LIMIT_PER_IP_WRITE = 3; // per IP per minute (writes)
+const RATE_LIMIT_GLOBAL_WRITE = 30; // total across all IPs per minute (writes)
+const RATE_LIMIT_PER_IP_READ = 30; // per IP per minute (reads)
 
 // --- Input sanitization ---
 const HTML_TAG_RE = /<[^>]*>/g;
@@ -73,6 +43,9 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 export class GraffitiWall extends Agent<Env, WallState> {
   initialState: WallState = { totalPieces: 0 };
 
+  private connectionCount = 0;
+  private readonly MAX_CONNECTIONS = 100;
+
   onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS graffiti (
       id TEXT PRIMARY KEY,
@@ -87,6 +60,11 @@ export class GraffitiWall extends Agent<Env, WallState> {
     )`;
     this.sql`CREATE INDEX IF NOT EXISTS idx_graffiti_created_at ON graffiti(created_at DESC)`;
 
+    this.sql`CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT PRIMARY KEY,
+      timestamps TEXT NOT NULL DEFAULT '[]'
+    )`;
+
     const row = this.sql<{ count: number }>`SELECT COUNT(*) as count FROM graffiti`[0];
     this.setState({ totalPieces: row?.count ?? 0 });
 
@@ -95,7 +73,49 @@ export class GraffitiWall extends Agent<Env, WallState> {
     registerCallable(this.getHistory, { kind: "method", name: "getHistory" } as any);
   }
 
-  onConnect(connection: Connection) {
+  /** Get client IP from connection state (WS) or request headers (HTTP RPC). */
+  private getClientIp(): string {
+    const { connection, request } = getCurrentAgent();
+    const connIp = (connection?.state as { ip?: string } | null)?.ip;
+    if (connIp) return connIp;
+    return request?.headers.get("CF-Connecting-IP") ?? "unknown-ip";
+  }
+
+  /** SQLite-backed rate limit check. Returns error message or null. */
+  private checkRateLimit(key: string, limit: number): string | null {
+    const now = Date.now();
+    const windowStart = now - RATE_LIMIT_WINDOW_MS;
+
+    const row = this.sql<{ timestamps: string }>`
+      SELECT timestamps FROM rate_limits WHERE key = ${key}
+    `[0];
+
+    let timestamps: number[] = row ? JSON.parse(row.timestamps) : [];
+    timestamps = timestamps.filter((t) => t > windowStart);
+
+    if (timestamps.length >= limit) {
+      const retryIn = Math.ceil((timestamps[0] + RATE_LIMIT_WINDOW_MS - now) / 1000);
+      return `Rate limited. Try again in ${retryIn}s`;
+    }
+
+    timestamps.push(now);
+    this.sql`INSERT OR REPLACE INTO rate_limits (key, timestamps)
+      VALUES (${key}, ${JSON.stringify(timestamps)})`;
+    return null;
+  }
+
+  onConnect(connection: Connection, ctx: ConnectionContext) {
+    // Enforce connection cap
+    if (this.connectionCount >= this.MAX_CONNECTIONS) {
+      connection.close(1013, "Too many connections");
+      return;
+    }
+    this.connectionCount++;
+
+    // Capture client IP for rate limiting
+    const ip = ctx.request.headers.get("CF-Connecting-IP") ?? "unknown-ip";
+    connection.setState({ ip });
+
     const pieces = this.sql<GraffitiPiece>`
       SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, created_at, completed_at
       FROM graffiti ORDER BY created_at DESC LIMIT 50
@@ -108,17 +128,17 @@ export class GraffitiWall extends Agent<Env, WallState> {
     connection.send(JSON.stringify(msg));
   }
 
-  onClose(connection: Connection) {
-    rateLimitMap.delete(connection.id);
+  onClose() {
+    this.connectionCount = Math.max(0, this.connectionCount - 1);
   }
 
   async contribute(text: string, authorName?: string) {
-    // Rate limit check
-    const { connection } = getCurrentAgent();
-    const rateLimitError = checkRateLimit(connection?.id ?? "unknown");
-    if (rateLimitError) {
-      throw new Error(rateLimitError);
-    }
+    // Rate limit: per-IP + global writes
+    const ip = this.getClientIp();
+    const perIpError = this.checkRateLimit(`ip:write:${ip}`, RATE_LIMIT_PER_IP_WRITE);
+    if (perIpError) throw new Error(perIpError);
+    const globalError = this.checkRateLimit("global:write", RATE_LIMIT_GLOBAL_WRITE);
+    if (globalError) throw new Error("The wall is busy. Try again in a moment.");
 
     // Input sanitization
     const { clean: cleanText, rejected } = sanitizeInput(text);
@@ -143,10 +163,18 @@ export class GraffitiWall extends Agent<Env, WallState> {
   }
 
   async getHistory(offset: number = 0, limit: number = 50) {
-    const clampedLimit = Math.min(limit, 100);
+    // Input validation
+    offset = Math.max(0, Math.floor(Number(offset) || 0));
+    limit = Math.max(1, Math.min(Math.floor(Number(limit) || 50), 100));
+
+    // Rate limit reads by IP
+    const ip = this.getClientIp();
+    const readError = this.checkRateLimit(`ip:read:${ip}`, RATE_LIMIT_PER_IP_READ);
+    if (readError) throw new Error(readError);
+
     const pieces = this.sql<GraffitiPiece>`
       SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, created_at, completed_at
-      FROM graffiti ORDER BY created_at DESC LIMIT ${clampedLimit} OFFSET ${offset}
+      FROM graffiti ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
     `;
     return { pieces: pieces.reverse(), total: this.state.totalPieces };
   }
