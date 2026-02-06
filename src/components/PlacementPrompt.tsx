@@ -15,7 +15,7 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
   const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
-    // Wait one frame so the form is laid out (but invisible), then measure + clamp
+    // Frame 1: measure while invisible, compute clamped offset, reveal
     requestAnimationFrame(() => {
       const el = formRef.current;
       const parent = el?.parentElement;
@@ -23,16 +23,22 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
         const pr = parent.getBoundingClientRect();
         const er = el.getBoundingClientRect();
         let dx = 0;
-        let dy = -er.height - 12; // 12px above click
-        if (er.top + dy < pr.top) dy = 12; // flip below if near top
+        let dy = -er.height - 12;
+        if (er.top + dy < pr.top) dy = 12;
         if (er.left - er.width / 2 < pr.left) dx = er.width / 2 - (er.left - pr.left);
         if (er.left + er.width / 2 > pr.right) dx = -(er.left + er.width / 2 - pr.right);
         setOffset({ x: dx, y: dy });
       }
       setPositioned(true);
-      inputRef.current?.focus();
     });
   }, []);
+
+  // Focus after the positioned render paints (element is now visible)
+  useEffect(() => {
+    if (positioned) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [positioned]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -69,7 +75,6 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Write on the wall..."
           maxLength={500}
           disabled={isSubmitting}
           className="bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-1.5 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30 transition-colors w-48"
