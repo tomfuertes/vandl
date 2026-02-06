@@ -68,6 +68,8 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
         visibility: ready ? "visible" : "hidden",
       }}
       onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseMove={(e) => e.stopPropagation()}
       onTouchEnd={(e) => e.stopPropagation()}
     >
       <form
