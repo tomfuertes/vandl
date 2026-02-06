@@ -10,7 +10,7 @@ declare global {
           callback: (token: string) => void;
           "error-callback"?: () => void;
           "expired-callback"?: () => void;
-          size?: "invisible" | "normal" | "compact";
+          size?: "flexible" | "normal" | "compact";
         }
       ) => string;
       reset: (widgetId: string) => void;
@@ -44,7 +44,7 @@ export function ContributeForm({ onSubmit, isSubmitting, turnstileSiteKey }: Con
     tokenRef.current = null;
     widgetIdRef.current = window.turnstile.render(containerRef.current, {
       sitekey: turnstileSiteKey,
-      size: "invisible",
+      size: "flexible",
       callback: (token: string) => { tokenRef.current = token; },
       "error-callback": () => { tokenRef.current = null; },
       "expired-callback": () => { tokenRef.current = null; },
