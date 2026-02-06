@@ -12,7 +12,9 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    // Delay focus to next frame — the canvas click that spawned this component
+    // still has the browser's focus, so immediate focus() gets stolen back
+    requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
   useEffect(() => {
