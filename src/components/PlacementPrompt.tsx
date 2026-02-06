@@ -7,38 +7,39 @@ interface PlacementPromptProps {
   isSubmitting: boolean;
 }
 
+// The form is ~44px tall. Default to 56px above click (44 + 12 gap).
+const DEFAULT_DY = -56;
+
 export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: PlacementPromptProps) {
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
-  const [positioned, setPositioned] = useState(false);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [ready, setReady] = useState(false);
+  const offsetRef = useRef({ x: 0, y: DEFAULT_DY });
 
   useEffect(() => {
-    // Frame 1: measure while invisible, compute clamped offset, reveal
+    // Measure on the first frame (visibility:hidden — no paint, no flash)
+    // then clamp edges and reveal
     requestAnimationFrame(() => {
       const el = formRef.current;
       const parent = el?.parentElement;
       if (el && parent) {
         const pr = parent.getBoundingClientRect();
         const er = el.getBoundingClientRect();
-        let dx = 0;
         let dy = -er.height - 12;
-        if (er.top + dy < pr.top) dy = 12;
+        let dx = 0;
+        if (er.top + dy < pr.top) dy = 12; // flip below
         if (er.left - er.width / 2 < pr.left) dx = er.width / 2 - (er.left - pr.left);
         if (er.left + er.width / 2 > pr.right) dx = -(er.left + er.width / 2 - pr.right);
-        setOffset({ x: dx, y: dy });
+        offsetRef.current = { x: dx, y: dy };
       }
-      setPositioned(true);
+      setReady(true);
     });
   }, []);
 
-  // Focus after the positioned render paints (element is now visible)
   useEffect(() => {
-    if (positioned) {
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
-  }, [positioned]);
+    if (ready) inputRef.current?.focus();
+  }, [ready]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -54,14 +55,17 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
     await onSubmit(text);
   };
 
+  const { x: dx, y: dy } = ready ? offsetRef.current : { x: 0, y: DEFAULT_DY };
+
   return (
     <div
       ref={formRef}
-      className={`absolute z-30 ${positioned ? "animate-fade-in" : "opacity-0"}`}
+      className={ready ? "absolute z-30 animate-fade-in" : "absolute z-30"}
       style={{
         left: `${pos.x * 100}%`,
         top: `${pos.y * 100}%`,
-        transform: `translate(calc(-50% + ${offset.x}px), ${offset.y}px)`,
+        transform: `translate(calc(-50% + ${dx}px), ${dy}px)`,
+        visibility: ready ? "visible" : "hidden",
       }}
       onClick={(e) => e.stopPropagation()}
       onTouchEnd={(e) => e.stopPropagation()}
@@ -77,7 +81,7 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
           onChange={(e) => setText(e.target.value)}
           maxLength={500}
           disabled={isSubmitting}
-          className="bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-1.5 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30 transition-colors w-48"
+          className="bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30 transition-colors w-48"
         />
         <button
           type="button"
