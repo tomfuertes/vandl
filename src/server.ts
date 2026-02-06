@@ -233,17 +233,23 @@ export class GraffitiWall extends Agent<Env, WallState> {
   }
 }
 
-// Allowlisted DO instance names — only "wall" is valid
+// Prevent callers from addressing arbitrary DO instances via /agents/:class/:name
 const ALLOWED_INSTANCE_NAMES = new Set(["wall"]);
 
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
+    // data: for base64 AI art, wss: for DO WebSocket, unsafe-inline for Tailwind/Vite styles
     "default-src 'self'; img-src 'self' data:; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
 } as const;
 
+// Clone response to get mutable headers (Workers responses are often immutable)
 function withSecurityHeaders(response: Response): Response {
+  // WebSocket upgrades carry a non-standard .webSocket property — re-wrapping destroys it
+  if (response.status === 101 || (response as any).webSocket) {
+    return response;
+  }
   const secured = new Response(response.body, response);
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     secured.headers.set(key, value);
@@ -253,18 +259,29 @@ function withSecurityHeaders(response: Response): Response {
 
 export default {
   async fetch(request: Request, env: Env) {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    // Block requests to non-allowlisted DO instance names
-    const agentMatch = url.pathname.match(/^\/agents\/[^/]+\/([^/]+)/);
-    if (agentMatch && !ALLOWED_INSTANCE_NAMES.has(agentMatch[1])) {
-      return withSecurityHeaders(new Response("Not found", { status: 404 }));
+      // Path convention: /agents/<className>/<instanceName>
+      const agentMatch = url.pathname.match(/^\/agents\/[^/]+\/([^/]+)/);
+      if (agentMatch) {
+        const instanceName = decodeURIComponent(agentMatch[1]);
+        if (!ALLOWED_INSTANCE_NAMES.has(instanceName)) {
+          return withSecurityHeaders(new Response("Not found", { status: 404 }));
+        }
+      }
+
+      const response =
+        (await routeAgentRequest(request, env)) ||
+        new Response("Not found", { status: 404 });
+
+      return withSecurityHeaders(response);
+    } catch (err) {
+      console.error("Unhandled fetch error:", err);
+      return new Response("Internal server error", {
+        status: 500,
+        headers: SECURITY_HEADERS,
+      });
     }
-
-    const response =
-      (await routeAgentRequest(request, env)) ||
-      new Response("Not found", { status: 404 });
-
-    return withSecurityHeaders(response);
   },
 } satisfies ExportedHandler<Env>;
