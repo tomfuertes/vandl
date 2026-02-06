@@ -10,11 +10,27 @@ interface PlacementPromptProps {
 export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: PlacementPromptProps) {
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
-    // Delay focus to next frame — the canvas click that spawned this component
-    // still has the browser's focus, so immediate focus() gets stolen back
-    requestAnimationFrame(() => inputRef.current?.focus());
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      // Measure form and clamp within parent bounds
+      const el = formRef.current;
+      const parent = el?.parentElement;
+      if (!el || !parent) return;
+      const pr = parent.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      let dx = 0;
+      let dy = -er.height - 12; // 12px gap above click point
+      // Clamp: don't overflow top
+      if (er.top + dy < pr.top) dy = 12; // flip below click point
+      // Clamp: don't overflow left/right
+      if (er.left + dx - er.width / 2 < pr.left) dx = er.width / 2 - (er.left - pr.left);
+      if (er.left + dx + er.width / 2 > pr.right) dx = -(er.left + er.width / 2 - pr.right);
+      setOffset({ x: dx, y: dy });
+    });
   }, []);
 
   useEffect(() => {
@@ -33,13 +49,15 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
 
   return (
     <div
+      ref={formRef}
       className="absolute z-30 animate-fade-in"
       style={{
         left: `${pos.x * 100}%`,
         top: `${pos.y * 100}%`,
-        transform: "translate(-50%, -120%)",
+        transform: `translate(calc(-50% + ${offset.x}px), ${offset.y}px)`,
       }}
       onClick={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
     >
       <form
         onSubmit={handleSubmit}

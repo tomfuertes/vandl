@@ -112,10 +112,9 @@ export function Wall() {
 
         {pieces.length === 0 && !promptPos && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center">
-              <p className="text-zinc-500 text-lg">The wall is empty.</p>
-              <p className="text-zinc-600 text-sm mt-1">Click anywhere to leave your mark.</p>
-            </div>
+            <p className="text-white/30 text-lg font-medium select-none">
+              Click anywhere to spray
+            </p>
           </div>
         )}
       </div>
