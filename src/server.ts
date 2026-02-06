@@ -457,13 +457,13 @@ export class GraffitiWall extends Agent<Env, WallState> {
       const epoch = (this.state.wallEpoch ?? 0) + 1;
 
       const themes = [
-        "cyberpunk alley", "abandoned subway", "rooftop sunset",
-        "rainy neon street", "brick warehouse", "concrete overpass",
-        "foggy bridge", "desert highway wall", "seaside boardwalk",
-        "snow-covered tunnel",
+        "weathered red brick", "cracked concrete", "rusted corrugated metal",
+        "painted cinderblock", "stucco with peeling paint", "plywood construction hoarding",
+        "mossy stone", "whitewashed cement", "industrial steel panels",
+        "sun-bleached adobe", "tiled subway wall", "rough sandstone",
       ];
       const theme = themes[Math.floor(Math.random() * themes.length)];
-      const seed = `${theme}, empty graffiti wall, urban photography, dramatic lighting, no text, no people`;
+      const seed = `${theme} wall surface, flat front view, head-on photograph, blank clean wall, no graffiti, no text, no people, no perspective, texture fill, even lighting`;
 
       const imageResponse = await this.env.AI.run(
         "@cf/black-forest-labs/flux-1-schnell" as any,
