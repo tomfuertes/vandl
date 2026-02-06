@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "npm install --prefer-offline && vite build",
     "preview": "vite preview",
     "deploy": "wrangler deploy"
   },

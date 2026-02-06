@@ -47,10 +47,10 @@ export function useWall() {
   });
 
   const contribute = useCallback(
-    async (text: string, authorName?: string) => {
+    async (text: string, authorName?: string, turnstileToken?: string) => {
       setIsSubmitting(true);
       try {
-        await agent.call("contribute", [text, authorName]);
+        await agent.call("contribute", [text, authorName, turnstileToken]);
       } finally {
         setIsSubmitting(false);
       }

@@ -5,6 +5,7 @@ import type { GraffitiPiece, WallState, WallMessage } from "./types";
 interface Env {
   AI: Ai;
   GRAFFITI_WALL: DurableObjectNamespace;
+  TURNSTILE_SECRET: string;
 }
 
 // Register methods as callable imperatively (TC39 decorators
@@ -101,6 +102,30 @@ export class GraffitiWall extends Agent<Env, WallState> {
     return request?.headers.get("CF-Connecting-IP") ?? "unknown-ip";
   }
 
+  /** Verify a Turnstile token against Cloudflare's siteverify endpoint. */
+  private async verifyTurnstile(token: string | undefined) {
+    if (!token) {
+      throw new Error("Bot verification required.");
+    }
+    const ip = this.getClientIp();
+    const resp = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret: this.env.TURNSTILE_SECRET,
+          response: token,
+          remoteip: ip,
+        }),
+      }
+    );
+    const result = (await resp.json()) as { success: boolean };
+    if (!result.success) {
+      throw new Error("Bot verification failed.");
+    }
+  }
+
   /**
    * SQLite-backed sliding-window rate limiter. Records a timestamp on success
    * and returns null. Returns an error message if over the limit. Fails open
@@ -176,7 +201,10 @@ export class GraffitiWall extends Agent<Env, WallState> {
     connection.send(JSON.stringify(msg));
   }
 
-  async contribute(text: string, authorName?: string) {
+  async contribute(text: string, authorName?: string, turnstileToken?: string) {
+    // Turnstile bot verification (before rate limiting to avoid burning slots on bots)
+    await this.verifyTurnstile(turnstileToken);
+
     // Rate limit: check global first (avoids burning per-IP slot on global rejection)
     const globalError = this.checkRateLimit("global:write", RATE_LIMIT_GLOBAL_WRITE);
     if (globalError) throw new Error("The wall is busy. Try again in a moment.");
@@ -334,7 +362,8 @@ const SECURITY_HEADERS = {
     // data: for base64 AI art, unsafe-inline for Tailwind/Vite styles
     // 'self' covers same-origin wss: in CSP Level 3 (w3c/webappsec-csp#7, Firefox bug 1345615)
     // — no need for blanket wss: which would allow connections to ANY WebSocket origin
-    "default-src 'self'; img-src 'self' data:; connect-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+    // challenges.cloudflare.com: Turnstile bot verification (script + iframe)
+    "default-src 'self'; img-src 'self' data:; connect-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; frame-src https://challenges.cloudflare.com",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
 } as const;
