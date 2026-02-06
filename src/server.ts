@@ -233,11 +233,38 @@ export class GraffitiWall extends Agent<Env, WallState> {
   }
 }
 
+// Allowlisted DO instance names — only "wall" is valid
+const ALLOWED_INSTANCE_NAMES = new Set(["wall"]);
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy":
+    "default-src 'self'; img-src 'self' data:; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'",
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+} as const;
+
+function withSecurityHeaders(response: Response): Response {
+  const secured = new Response(response.body, response);
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    secured.headers.set(key, value);
+  }
+  return secured;
+}
+
 export default {
   async fetch(request: Request, env: Env) {
-    return (
+    const url = new URL(request.url);
+
+    // Block requests to non-allowlisted DO instance names
+    const agentMatch = url.pathname.match(/^\/agents\/[^/]+\/([^/]+)/);
+    if (agentMatch && !ALLOWED_INSTANCE_NAMES.has(agentMatch[1])) {
+      return withSecurityHeaders(new Response("Not found", { status: 404 }));
+    }
+
+    const response =
       (await routeAgentRequest(request, env)) ||
-      new Response("Not found", { status: 404 })
-    );
+      new Response("Not found", { status: 404 });
+
+    return withSecurityHeaders(response);
   },
 } satisfies ExportedHandler<Env>;
