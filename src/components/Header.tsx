@@ -10,11 +10,10 @@ export function Header({ totalPieces, authorName, onAuthorNameChange, historyCou
   return (
     <header className="sticky top-0 z-10 backdrop-blur-md bg-zinc-950/80 border-b border-zinc-800">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <h1 className="text-2xl font-black tracking-tight text-white">
-          VANDL
-        </h1>
+        <h1 className="text-2xl font-black tracking-tight text-white">VANDL</h1>
         <div className="flex items-center gap-4">
           <button
+            type="button"
             onClick={onHistoryToggle}
             className="relative bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-1 text-zinc-400 text-sm hover:text-white hover:border-purple-500/60 transition-colors"
           >

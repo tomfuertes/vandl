@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import type { WallSnapshot, WallHistoryEntry } from "../types";
+import { useCallback, useRef, useState } from "react";
+import type { WallHistoryEntry, WallSnapshot } from "../types";
 
 interface UseWallHistoryOptions {
   agent: { call: <T>(method: string, args?: unknown[]) => Promise<T> };
@@ -17,30 +17,34 @@ export function useWallHistory({ agent }: UseWallHistoryOptions) {
 
   const processQueue = useCallback(() => {
     while (inFlight.current < MAX_CONCURRENT_FETCHES && queue.current.length > 0) {
+      // biome-ignore lint/style/noNonNullAssertion: length > 0 checked in while condition
       const next = queue.current.shift()!;
       inFlight.current++;
       fetchSnapshot(next.id).then(next.resolve);
     }
   }, []);
 
-  const fetchSnapshot = useCallback(async (id: string): Promise<WallSnapshot | null> => {
-    try {
-      const resp = await fetch(`/api/wall-history/${encodeURIComponent(id)}`);
-      if (!resp.ok) {
-        console.error(`Snapshot fetch failed: ${resp.status} for id=${id}`);
+  const fetchSnapshot = useCallback(
+    async (id: string): Promise<WallSnapshot | null> => {
+      try {
+        const resp = await fetch(`/api/wall-history/${encodeURIComponent(id)}`);
+        if (!resp.ok) {
+          console.error(`Snapshot fetch failed: ${resp.status} for id=${id}`);
+          return null;
+        }
+        const snapshot: WallSnapshot = await resp.json();
+        cache.current.set(id, snapshot);
+        return snapshot;
+      } catch (err) {
+        console.error("Failed to fetch wall snapshot:", err);
         return null;
+      } finally {
+        inFlight.current--;
+        processQueue();
       }
-      const snapshot: WallSnapshot = await resp.json();
-      cache.current.set(id, snapshot);
-      return snapshot;
-    } catch (err) {
-      console.error("Failed to fetch wall snapshot:", err);
-      return null;
-    } finally {
-      inFlight.current--;
-      processQueue();
-    }
-  }, [processQueue]);
+    },
+    [processQueue],
+  );
 
   const refreshIndex = useCallback(async () => {
     setIsLoading(true);
@@ -56,19 +60,22 @@ export function useWallHistory({ agent }: UseWallHistoryOptions) {
     }
   }, [agent]);
 
-  const getSnapshot = useCallback(async (id: string): Promise<WallSnapshot | null> => {
-    const cached = cache.current.get(id);
-    if (cached) return cached;
+  const getSnapshot = useCallback(
+    async (id: string): Promise<WallSnapshot | null> => {
+      const cached = cache.current.get(id);
+      if (cached) return cached;
 
-    if (inFlight.current >= MAX_CONCURRENT_FETCHES) {
-      return new Promise((resolve) => {
-        queue.current.push({ id, resolve });
-      });
-    }
+      if (inFlight.current >= MAX_CONCURRENT_FETCHES) {
+        return new Promise((resolve) => {
+          queue.current.push({ id, resolve });
+        });
+      }
 
-    inFlight.current++;
-    return fetchSnapshot(id);
-  }, [fetchSnapshot]);
+      inFlight.current++;
+      return fetchSnapshot(id);
+    },
+    [fetchSnapshot],
+  );
 
   return { index, isLoading, error, refreshIndex, getSnapshot };
 }

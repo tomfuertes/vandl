@@ -11,7 +11,7 @@ export function RemoteCursor({ cursor }: { cursor: CursorPosition }) {
         transform: "translate(-16px, -32px)",
       }}
     >
-      <svg width="32" height="36" viewBox="0 0 40 40" fill="none">
+      <svg width="32" height="36" viewBox="0 0 40 40" fill="none" role="img" aria-hidden="true">
         <rect x="12" y="18" width="16" height="20" rx="3" fill="#d4d4d4" stroke="#999" strokeWidth="0.5" />
         <rect x="14" y="16" width="12" height="4" rx="1.5" fill="#bbb" />
         <rect x="17" y="10" width="6" height="7" rx="1.5" fill="#999" />
@@ -20,9 +20,7 @@ export function RemoteCursor({ cursor }: { cursor: CursorPosition }) {
         <circle cx="20" cy="7" r="2.5" fill="#e5e5e5" opacity="0.5" />
         <circle cx="14" cy="5" r="1.5" fill="#e5e5e5" opacity="0.3" />
       </svg>
-      <span className="text-[10px] text-zinc-400/80 whitespace-nowrap absolute left-8 top-2">
-        {cursor.name}
-      </span>
+      <span className="text-[10px] text-zinc-400/80 whitespace-nowrap absolute left-8 top-2">{cursor.name}</span>
     </div>
   );
 }

@@ -6,7 +6,10 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --fix src/",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "agents": "^0.3.0",
@@ -14,6 +17,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "1.9.4",
     "@cloudflare/vite-plugin": "^1.0.0",
     "@cloudflare/workers-types": "^4.20260205.0",
     "@tailwindcss/vite": "^4.0.0",

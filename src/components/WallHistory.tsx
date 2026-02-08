@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import type { WallSnapshot, WallHistoryEntry } from "../types";
+import { useEffect, useRef, useState } from "react";
+import type { WallHistoryEntry, WallSnapshot } from "../types";
 
 function piecePosition(posX: number | undefined, posY: number | undefined): React.CSSProperties {
   return {
@@ -36,10 +36,14 @@ function EpochCard({
     loaded.current = true;
     setLoadError(false);
     getSnapshot(entry.id)
-      .then((s) => { if (s) setSnapshot(s); else setLoadError(true); })
+      .then((s) => {
+        if (s) setSnapshot(s);
+        else setLoadError(true);
+      })
       .catch(() => setLoadError(true));
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: doLoad intentionally captures entry.id/getSnapshot from props
   useEffect(() => {
     if (loaded.current) return;
     const el = cardRef.current;
@@ -52,7 +56,7 @@ function EpochCard({
           observer.disconnect();
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.1 },
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -68,6 +72,7 @@ function EpochCard({
 
   return (
     <>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: card click for visual expansion */}
       <div
         ref={cardRef}
         className="flex-shrink-0 w-48 h-full rounded-lg overflow-hidden cursor-pointer border border-zinc-700/50 hover:border-purple-500/50 transition-colors relative group"
@@ -76,7 +81,12 @@ function EpochCard({
         {loadError ? (
           <div className="absolute inset-0 bg-zinc-800 flex items-center justify-center">
             <button
-              onClick={(e) => { e.stopPropagation(); loaded.current = false; doLoad(); }}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                loaded.current = false;
+                doLoad();
+              }}
               className="text-zinc-400 text-xs underline"
             >
               Failed to load — tap to retry
@@ -94,12 +104,7 @@ function EpochCard({
                 style={piecePosition(p.pos_x, p.pos_y)}
               >
                 {p.image_data && (
-                  <img
-                    src={p.image_data}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                  <img src={p.image_data} alt="" className="w-full h-full object-cover" loading="lazy" />
                 )}
               </div>
             ))}
@@ -116,10 +121,12 @@ function EpochCard({
       </div>
 
       {expanded && snapshot && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop dismiss
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setExpanded(false)}
         >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation only */}
           <div
             className="relative w-full max-w-4xl aspect-video rounded-lg overflow-hidden"
             onClick={(e) => e.stopPropagation()}
@@ -129,11 +136,7 @@ function EpochCard({
               style={{ backgroundImage: `url(${snapshot.backgroundImage})` }}
             >
               {snapshot.pieces.map((p) => (
-                <div
-                  key={p.id}
-                  className="absolute group/piece"
-                  style={piecePosition(p.pos_x, p.pos_y)}
-                >
+                <div key={p.id} className="absolute group/piece" style={piecePosition(p.pos_x, p.pos_y)}>
                   {p.image_data && (
                     <img
                       src={p.image_data}
@@ -149,6 +152,7 @@ function EpochCard({
             </div>
             <div className="absolute top-2 right-2">
               <button
+                type="button"
                 onClick={() => setExpanded(false)}
                 className="bg-black/60 hover:bg-black/80 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm transition-colors"
               >
@@ -159,9 +163,7 @@ function EpochCard({
               <p className="text-sm font-mono text-zinc-200">
                 Epoch {snapshot.epoch} &middot; {snapshot.pieceCount} pieces
               </p>
-              <p className="text-xs text-zinc-400">
-                {new Date(snapshot.createdAt).toLocaleString()}
-              </p>
+              <p className="text-xs text-zinc-400">{new Date(snapshot.createdAt).toLocaleString()}</p>
             </div>
           </div>
         </div>
@@ -170,15 +172,7 @@ function EpochCard({
   );
 }
 
-export function WallHistory({
-  index,
-  isLoading,
-  error,
-  onRefresh,
-  getSnapshot,
-  isOpen,
-  onClose,
-}: WallHistoryProps) {
+export function WallHistory({ index, isLoading, error, onRefresh, getSnapshot, isOpen, onClose }: WallHistoryProps) {
   useEffect(() => {
     if (isOpen) onRefresh();
   }, [isOpen, onRefresh]);
@@ -188,27 +182,20 @@ export function WallHistory({
   return (
     <div className="absolute bottom-0 inset-x-0 z-20 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 transition-transform">
       <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/50">
-        <h2 className="text-sm font-bold text-zinc-300 tracking-wide uppercase">
-          Wall History
-        </h2>
-        <button
-          onClick={onClose}
-          className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
-        >
+        <h2 className="text-sm font-bold text-zinc-300 tracking-wide uppercase">Wall History</h2>
+        <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
           Close
         </button>
       </div>
 
       <div className="h-48 overflow-x-auto overflow-y-hidden p-3 flex gap-3">
         {isLoading && index.length === 0 && (
-          <div className="flex items-center justify-center w-full text-zinc-500 text-sm">
-            Loading history...
-          </div>
+          <div className="flex items-center justify-center w-full text-zinc-500 text-sm">Loading history...</div>
         )}
         {error && (
           <div className="flex items-center justify-center w-full text-red-400 text-sm">
             {error} —{" "}
-            <button onClick={onRefresh} className="underline ml-1">
+            <button type="button" onClick={onRefresh} className="underline ml-1">
               try again
             </button>
           </div>

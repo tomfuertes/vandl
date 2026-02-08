@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef } from "react";
 import { useAgent } from "agents/react";
-import type { GraffitiPiece, WallState, WallMessage, CursorPosition } from "../types";
+import { useCallback, useRef, useState } from "react";
+import type { CursorPosition, GraffitiPiece, WallMessage, WallState } from "../types";
 import { useWallHistory } from "./useWallHistory";
 
 export function useWall() {
@@ -49,9 +49,7 @@ export function useWall() {
           break;
 
         case "piece_updated":
-          setPieces((prev) =>
-            prev.map((p) => (p.id === msg.piece.id ? msg.piece : p))
-          );
+          setPieces((prev) => prev.map((p) => (p.id === msg.piece.id ? msg.piece : p)));
           break;
 
         case "cursor_update":
@@ -84,7 +82,7 @@ export function useWall() {
         setIsSubmitting(false);
       }
     },
-    [agent]
+    [agent],
   );
 
   const sendCursor = useCallback(
@@ -95,7 +93,7 @@ export function useWall() {
         cursorThrottleRef.current = null;
       }, 100);
     },
-    [agent]
+    [agent],
   );
 
   const loadMore = useCallback(async () => {
