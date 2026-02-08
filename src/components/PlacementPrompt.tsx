@@ -65,7 +65,7 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
       style={{
         left: `${pos.x * 100}%`,
         top: `${pos.y * 100}%`,
-        transform: `translate(calc(-50% + ${dx}px), ${dy}px)`,
+        translate: `calc(-50% + ${dx}px) ${dy}px`,
         visibility: ready ? "visible" : "hidden",
       }}
       onClick={(e) => e.stopPropagation()}

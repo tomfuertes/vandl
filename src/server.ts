@@ -527,9 +527,19 @@ export class GraffitiWall extends Agent<Env, WallState> {
         "bare concrete retaining wall along a road",
         "blank stone wall of an old factory, weeds at the base",
         "clean side of a parking garage, asphalt below",
+        "weathered wooden fence along an alley, trash cans nearby",
+        "tiled underpass wall with fluorescent lights overhead",
+        "corrugated metal wall of a shipping container yard",
+        "smooth poured concrete wall of a highway overpass, chain-link fence below",
+        "faded yellow stucco wall of a bodega at night, neon signs glowing",
+        "large blank wall of a public library, bike rack in front",
+        "boarded-up storefront wall with peeling wheat-paste layers",
+        "sandstone wall of an old church, iron gate at the base",
+        "raw concrete wall of a skate park, scuff marks at the bottom",
+        "plastered wall of a train station platform, benches below",
       ];
       const wall = walls[Math.floor(Math.random() * walls.length)];
-      const seed = `street photography, ${wall}, straight-on view, daytime, no people, no graffiti, no text, the wall takes up most of the frame`;
+      const seed = `street photography, ${wall}, camera perpendicular to wall surface, flat front-facing view, no perspective distortion, no angle, no graffiti, the wall takes up most of the frame`;
 
       const imageResponse = await this.env.AI.run(
         // biome-ignore lint/suspicious/noExplicitAny: Workers AI model strings not in @cloudflare/workers-types
