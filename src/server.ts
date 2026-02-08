@@ -86,8 +86,9 @@ export class GraffitiWall extends Agent<Env, WallState> {
     this.sql`CREATE INDEX IF NOT EXISTS idx_graffiti_created_at ON graffiti(created_at DESC)`;
 
     // Spatial canvas columns (idempotent migration)
-    try { this.sql`ALTER TABLE graffiti ADD COLUMN pos_x REAL NOT NULL DEFAULT 0.5`; } catch {}
-    try { this.sql`ALTER TABLE graffiti ADD COLUMN pos_y REAL NOT NULL DEFAULT 0.5`; } catch {}
+    const cols = new Set(this.sql<{ name: string }>`PRAGMA table_info(graffiti)`.map(r => r.name));
+    if (!cols.has("pos_x")) this.sql`ALTER TABLE graffiti ADD COLUMN pos_x REAL NOT NULL DEFAULT 0.5`;
+    if (!cols.has("pos_y")) this.sql`ALTER TABLE graffiti ADD COLUMN pos_y REAL NOT NULL DEFAULT 0.5`;
 
     this.sql`CREATE TABLE IF NOT EXISTS rate_limits (
       key TEXT PRIMARY KEY,
