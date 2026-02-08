@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useAgent } from "agents/react";
 import type { GraffitiPiece, WallState, WallMessage, CursorPosition } from "../types";
+import { useWallHistory } from "./useWallHistory";
 
 export function useWall() {
   const [pieces, setPieces] = useState<GraffitiPiece[]>([]);
@@ -13,6 +14,10 @@ export function useWall() {
   const hasLoadedHistory = useRef(false);
   const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Ref to break circular dependency: onMessage needs wallHistory.refreshIndex,
+  // but wallHistory needs agent. We update the ref after both are created.
+  const refreshHistoryRef = useRef<() => void>(() => {});
+
   const agent = useAgent<WallState>({
     agent: "graffiti-wall",
     name: "wall",
@@ -21,12 +26,10 @@ export function useWall() {
     },
     onMessage: (event: MessageEvent) => {
       let msg: WallMessage;
-      // Parse only — catch is intentionally narrow so runtime errors in the
-      // switch handlers below surface instead of being silently swallowed (#15)
       try {
         msg = JSON.parse(event.data);
       } catch {
-        return; // Non-JSON message (Agents SDK state sync, identity, etc.)
+        return;
       }
 
       switch (msg.type) {
@@ -56,12 +59,21 @@ export function useWall() {
           break;
 
         case "wall_rotated":
+          setPieces([]);
           setBackgroundImage(msg.backgroundImage);
           setWallEpoch(msg.wallEpoch);
+          hasLoadedHistory.current = true;
+          break;
+
+        case "wall_history_updated":
+          refreshHistoryRef.current();
           break;
       }
     },
   });
+
+  const wallHistory = useWallHistory({ agent });
+  refreshHistoryRef.current = wallHistory.refreshIndex;
 
   const contribute = useCallback(
     async (text: string, authorName?: string, turnstileToken?: string, posX?: number, posY?: number) => {
@@ -107,5 +119,6 @@ export function useWall() {
     backgroundImage,
     wallEpoch,
     sendCursor,
+    wallHistory,
   };
 }

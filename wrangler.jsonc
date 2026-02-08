@@ -21,6 +21,15 @@
   "ai": {
     "binding": "AI"
   },
+  "r2_buckets": [
+    {
+      "binding": "WALL_HISTORY",
+      "bucket_name": "vandl-wall-history"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
   "routes": [
     { "pattern": "vandl.tomfuertes.com", "custom_domain": true }
   ],

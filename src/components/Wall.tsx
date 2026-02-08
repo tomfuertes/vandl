@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { CanvasPiece } from "./CanvasPiece";
 import { RemoteCursor } from "./RemoteCursor";
 import { PlacementPrompt } from "./PlacementPrompt";
+import { WallHistory } from "./WallHistory";
 
 export function Wall() {
   const {
@@ -14,10 +15,12 @@ export function Wall() {
     cursors,
     backgroundImage,
     sendCursor,
+    wallHistory,
   } = useWall();
 
   const [promptPos, setPromptPos] = useState<{ x: number; y: number } | null>(null);
   const [authorName, setAuthorName] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const toNormalized = useCallback(
@@ -73,6 +76,8 @@ export function Wall() {
         totalPieces={totalPieces}
         authorName={authorName}
         onAuthorNameChange={setAuthorName}
+        historyCount={wallHistory.index.length}
+        onHistoryToggle={() => setHistoryOpen((prev) => !prev)}
       />
 
       <div
@@ -117,6 +122,16 @@ export function Wall() {
             </p>
           </div>
         )}
+
+        <WallHistory
+          index={wallHistory.index}
+          isLoading={wallHistory.isLoading}
+          error={wallHistory.error}
+          onRefresh={wallHistory.refreshIndex}
+          getSnapshot={wallHistory.getSnapshot}
+          isOpen={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+        />
       </div>
     </div>
   );

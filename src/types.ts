@@ -25,6 +25,31 @@ export interface CursorPosition {
   y: number;
 }
 
+export interface SnapshotPiece {
+  id: string;
+  image_data: string;
+  pos_x: number;
+  pos_y: number;
+  author_name: string;
+  art_prompt: string | null;
+}
+
+export interface WallSnapshot {
+  id: string;
+  epoch: number;
+  backgroundImage: string;
+  pieces: SnapshotPiece[];
+  pieceCount: number;
+  createdAt: string;
+}
+
+export interface WallHistoryEntry {
+  id: string;
+  epoch: number;
+  pieceCount: number;
+  createdAt: string;
+}
+
 export type WallMessage =
   | {
       type: "wall_history";
@@ -37,4 +62,5 @@ export type WallMessage =
   | { type: "piece_added"; piece: GraffitiPiece }
   | { type: "piece_updated"; piece: GraffitiPiece }
   | { type: "cursor_update"; cursors: CursorPosition[] }
-  | { type: "wall_rotated"; backgroundImage: string; wallEpoch: number };
+  | { type: "wall_rotated"; backgroundImage: string; wallEpoch: number }
+  | { type: "wall_history_updated" };

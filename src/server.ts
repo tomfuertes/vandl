@@ -1,10 +1,11 @@
 import { Agent, callable, routeAgentRequest, getCurrentAgent } from "agents";
 import type { Connection, ConnectionContext } from "agents";
-import type { GraffitiPiece, WallState, WallMessage, CursorPosition } from "./types";
+import type { GraffitiPiece, WallState, WallMessage, CursorPosition, WallSnapshot, WallHistoryEntry, SnapshotPiece } from "./types";
 
 interface Env {
   AI: Ai;
   GRAFFITI_WALL: DurableObjectNamespace;
+  WALL_HISTORY: R2Bucket;
   TURNSTILE_SECRET: string;
   TURNSTILE_SITE_KEY: string;
 }
@@ -110,6 +111,14 @@ export class GraffitiWall extends Agent<Env, WallState> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`;
 
+    this.sql`CREATE TABLE IF NOT EXISTS wall_history_index (
+      id TEXT PRIMARY KEY,
+      epoch INTEGER NOT NULL,
+      piece_count INTEGER NOT NULL,
+      r2_key TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`;
+
     // Load persisted state
     const row = this.sql<{ count: number }>`SELECT COUNT(*) as count FROM graffiti`[0];
     const epochRow = this.sql<{ epoch: number }>`
@@ -166,6 +175,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
     // Mark methods as callable for RPC from useAgent().call()
     registerCallable(this.contribute, { kind: "method", name: "contribute" } as any);
     registerCallable(this.getHistory, { kind: "method", name: "getHistory" } as any);
+    registerCallable(this.getWallHistoryIndex, { kind: "method", name: "getWallHistoryIndex" } as any);
   }
 
   /** Get client IP from connection state (WS) or request headers (HTTP RPC). */
@@ -491,10 +501,55 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.sql`INSERT INTO wall_snapshots (id, epoch, piece_count, background_id)
                VALUES (${crypto.randomUUID()}, ${epoch}, ${pieceCount}, ${bgId})`;
 
+      // Archive completed pieces to R2 before clearing (each step isolated)
+      const completedPieces = this.sql<SnapshotPiece>`
+        SELECT id, image_data, pos_x, pos_y, author_name, art_prompt
+        FROM graffiti WHERE status = 'complete' AND image_data IS NOT NULL
+      `;
+      if (completedPieces.length > 0) {
+        const snapshotId = crypto.randomUUID();
+        const r2Key = `snapshots/${snapshotId}.json`;
+        const snapshot: WallSnapshot = {
+          id: snapshotId,
+          epoch: this.state.wallEpoch,
+          backgroundImage: this.state.backgroundImage ?? "",
+          pieces: completedPieces,
+          pieceCount: completedPieces.length,
+          createdAt: new Date().toISOString(),
+        };
+
+        let r2Ok = false;
+        try {
+          await this.env.WALL_HISTORY.put(r2Key, JSON.stringify(snapshot));
+          r2Ok = true;
+        } catch (r2Err) {
+          console.error("R2 snapshot upload failed:", r2Err);
+        }
+
+        if (r2Ok) {
+          try {
+            this.sql`INSERT INTO wall_history_index (id, epoch, piece_count, r2_key)
+                     VALUES (${snapshotId}, ${this.state.wallEpoch}, ${completedPieces.length}, ${r2Key})`;
+          } catch (sqlErr) {
+            console.error("wall_history_index INSERT failed (orphaned R2 key:", r2Key, "):", sqlErr);
+            try { await this.env.WALL_HISTORY.delete(r2Key); } catch { /* best effort */ }
+          }
+          try {
+            this.broadcast(JSON.stringify({ type: "wall_history_updated" } satisfies WallMessage));
+          } catch (broadcastErr) {
+            console.error("History update broadcast failed:", broadcastErr);
+          }
+        }
+      }
+
+      // Clear the canvas — old pieces belong to the previous epoch
+      this.sql`DELETE FROM graffiti`;
+
       this.setState({
         ...this.state,
         backgroundImage: bgImage,
         wallEpoch: epoch,
+        totalPieces: 0,
       });
 
       this.broadcast(JSON.stringify({
@@ -507,13 +562,63 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.sql`DELETE FROM wall_backgrounds WHERE id NOT IN (
         SELECT id FROM wall_backgrounds ORDER BY created_at DESC LIMIT 24
       )`;
-
-      // Cleanup: keep last 500 pieces
-      this.sql`DELETE FROM graffiti WHERE id NOT IN (
-        SELECT id FROM graffiti ORDER BY created_at DESC LIMIT 500
-      )`;
     } catch (err) {
       console.error("rotateWall failed:", err);
+    }
+  }
+
+  async getWallHistoryIndex(): Promise<WallHistoryEntry[]> {
+    const ip = this.getClientIp();
+    const readError = this.checkRateLimit(`ip:read:${ip}`, RATE_LIMIT_PER_IP_READ);
+    if (readError) throw new Error(readError);
+
+    return this.sql<WallHistoryEntry>`
+      SELECT id, epoch, piece_count as pieceCount, created_at as createdAt
+      FROM wall_history_index ORDER BY created_at DESC LIMIT 100
+    `;
+  }
+
+  async getWallSnapshot(id: string): Promise<WallSnapshot | null> {
+    if (typeof id !== "string" || id.length === 0 || id.length > 100) return null;
+
+    const ip = this.getClientIp();
+    const readError = this.checkRateLimit(`ip:read:${ip}`, RATE_LIMIT_PER_IP_READ);
+    if (readError) throw new Error(readError);
+
+    const row = this.sql<{ r2_key: string }>`
+      SELECT r2_key FROM wall_history_index WHERE id = ${id}
+    `[0];
+    if (!row) return null;
+
+    try {
+      const obj = await this.env.WALL_HISTORY.get(row.r2_key);
+      if (!obj) {
+        console.error(`R2 object missing for indexed snapshot id=${id}, r2_key=${row.r2_key}`);
+        return null;
+      }
+      return await obj.json<WallSnapshot>();
+    } catch (err) {
+      console.error(`Failed to fetch/parse R2 snapshot id=${id}:`, err);
+      throw err;
+    }
+  }
+
+  async cleanupOldHistory() {
+    const stale = this.sql<{ id: string; r2_key: string }>`
+      SELECT id, r2_key FROM wall_history_index
+      WHERE created_at < datetime('now', '-30 days')
+    `;
+    const deletedIds: string[] = [];
+    for (const row of stale) {
+      try {
+        await this.env.WALL_HISTORY.delete(row.r2_key);
+        deletedIds.push(row.id);
+      } catch (err) {
+        console.error(`Failed to delete R2 object ${row.r2_key} (keeping index row for retry):`, err);
+      }
+    }
+    for (const id of deletedIds) {
+      this.sql`DELETE FROM wall_history_index WHERE id = ${id}`;
     }
   }
 }
@@ -550,6 +655,24 @@ export default {
     try {
       const url = new URL(request.url);
 
+      // API route: /api/wall-history/:id
+      const historyMatch = url.pathname.match(/^\/api\/wall-history\/([^/]+)$/);
+      if (historyMatch && request.method === "GET") {
+        const snapshotId = decodeURIComponent(historyMatch[1]);
+        const doId = env.GRAFFITI_WALL.idFromName("wall");
+        const stub = env.GRAFFITI_WALL.get(doId) as any;
+        const snapshot = await stub.getWallSnapshot(snapshotId);
+        if (!snapshot) {
+          return withSecurityHeaders(new Response("Not found", { status: 404 }));
+        }
+        return withSecurityHeaders(new Response(JSON.stringify(snapshot), {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=86400, immutable",
+          },
+        }));
+      }
+
       // Path convention: /agents/<className>/<instanceName>
       const agentMatch = url.pathname.match(/^\/agents\/[^/]+\/([^/]+)/);
       if (agentMatch) {
@@ -571,5 +694,10 @@ export default {
         headers: SECURITY_HEADERS,
       });
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env) {
+    const doId = env.GRAFFITI_WALL.idFromName("wall");
+    const stub = env.GRAFFITI_WALL.get(doId) as any;
+    await stub.cleanupOldHistory();
   },
 } satisfies ExportedHandler<Env>;
