@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface PlacementPromptProps {
   pos: { x: number; y: number };
@@ -58,6 +58,7 @@ export function PlacementPrompt({ pos, onSubmit, onCancel, isSubmitting }: Place
   const { x: dx, y: dy } = ready ? offsetRef.current : { x: 0, y: DEFAULT_DY };
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation only — not an interactive element
     <div
       ref={formRef}
       className={ready ? "absolute z-30 animate-fade-in" : "absolute z-30"}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { GraffitiPiece } from "../types";
 
 export function CanvasPiece({ piece }: { piece: GraffitiPiece }) {
@@ -40,9 +40,7 @@ export function CanvasPiece({ piece }: { piece: GraffitiPiece }) {
         </div>
       )}
 
-      <p className="text-zinc-500 text-[10px] text-center mt-1 truncate">
-        {piece.author_name}
-      </p>
+      <p className="text-zinc-500 text-[10px] text-center mt-1 truncate">{piece.author_name}</p>
     </div>
   );
 }

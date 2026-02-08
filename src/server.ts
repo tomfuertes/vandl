@@ -1,6 +1,14 @@
-import { Agent, callable, routeAgentRequest, getCurrentAgent } from "agents";
+import { Agent, callable, getCurrentAgent, routeAgentRequest } from "agents";
 import type { Connection, ConnectionContext } from "agents";
-import type { GraffitiPiece, WallState, WallMessage, CursorPosition, WallSnapshot, WallHistoryEntry, SnapshotPiece } from "./types";
+import type {
+  CursorPosition,
+  GraffitiPiece,
+  SnapshotPiece,
+  WallHistoryEntry,
+  WallMessage,
+  WallSnapshot,
+  WallState,
+} from "./types";
 
 interface Env {
   AI: Ai;
@@ -23,8 +31,10 @@ const RATE_LIMIT_PER_IP_READ = 30; // per IP per minute (reads)
 // --- Content pre-filter (fast blocklist before LLM moderation) ---
 // Encoded to keep slurs out of source. Decoded once at module load.
 const PROFANITY_RE = new RegExp(
-  atob("XGIobmlnZyg/OmVyfGEpfGZhZyg/OmdvdCk/fHJldGFyZHxraWtlfHNwaWN8Y2hpbmt8dHJhbm55fGN1bnR8Y29ja1xzKnN1Y2t8Ymxvd1xzKmpvYnxnYW5nXHMqYmFuZ3xjaGlsZFxzKnBvcm58a2lkZGllXHMqcG9ybnxraWxsXHMqKD86eW91cik/c2VsZilcYg=="),
-  "i"
+  atob(
+    "XGIobmlnZyg/OmVyfGEpfGZhZyg/OmdvdCk/fHJldGFyZHxraWtlfHNwaWN8Y2hpbmt8dHJhbm55fGN1bnR8Y29ja1xzKnN1Y2t8Ymxvd1xzKmpvYnxnYW5nXHMqYmFuZ3xjaGlsZFxzKnBvcm58a2lkZGllXHMqcG9ybnxraWxsXHMqKD86eW91cik/c2VsZilcYg==",
+  ),
+  "i",
 );
 
 function containsProfanity(text: string): boolean {
@@ -34,9 +44,13 @@ function containsProfanity(text: string): boolean {
 // --- Input sanitization ---
 const HTML_TAG_RE = /<[^>]*>/g;
 const SCRIPT_RE = /javascript:|on\w+\s*=|<script|<iframe|<object|<embed/i;
-const SQL_INJECT_RE = /(\b(DROP|DELETE|INSERT|UPDATE|ALTER|EXEC|UNION)\b.*\b(TABLE|FROM|INTO|SET)\b)|(--.*)|(;.*\b(DROP|DELETE)\b)/i;
+const SQL_INJECT_RE =
+  /(\b(DROP|DELETE|INSERT|UPDATE|ALTER|EXEC|UNION)\b.*\b(TABLE|FROM|INTO|SET)\b)|(--.*)|(;.*\b(DROP|DELETE)\b)/i;
 
-function sanitizeInput(text: string): { clean: string; rejected: string | null } {
+function sanitizeInput(text: string): {
+  clean: string;
+  rejected: string | null;
+} {
   const stripped = text.replace(HTML_TAG_RE, "").trim();
 
   if (SCRIPT_RE.test(text)) {
@@ -55,7 +69,11 @@ function sanitizeInput(text: string): { clean: string; rejected: string | null }
 }
 
 export class GraffitiWall extends Agent<Env, WallState> {
-  initialState: WallState = { totalPieces: 0, backgroundImage: null, wallEpoch: 0 };
+  initialState: WallState = {
+    totalPieces: 0,
+    backgroundImage: null,
+    wallEpoch: 0,
+  };
 
   // Concurrency limit for AI generation pipelines
   private pendingGenerations = 0;
@@ -87,7 +105,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
     this.sql`CREATE INDEX IF NOT EXISTS idx_graffiti_created_at ON graffiti(created_at DESC)`;
 
     // Spatial canvas columns (idempotent migration)
-    const cols = new Set(this.sql<{ name: string }>`PRAGMA table_info(graffiti)`.map(r => r.name));
+    const cols = new Set(this.sql<{ name: string }>`PRAGMA table_info(graffiti)`.map((r) => r.name));
     if (!cols.has("pos_x")) this.sql`ALTER TABLE graffiti ADD COLUMN pos_x REAL NOT NULL DEFAULT 0.5`;
     if (!cols.has("pos_y")) this.sql`ALTER TABLE graffiti ADD COLUMN pos_y REAL NOT NULL DEFAULT 0.5`;
 
@@ -120,7 +138,9 @@ export class GraffitiWall extends Agent<Env, WallState> {
     )`;
 
     // Load persisted state
-    const row = this.sql<{ count: number }>`SELECT COUNT(*) as count FROM graffiti`[0];
+    const row = this.sql<{
+      count: number;
+    }>`SELECT COUNT(*) as count FROM graffiti`[0];
     const epochRow = this.sql<{ epoch: number }>`
       SELECT MAX(epoch) as epoch FROM wall_snapshots
     `[0];
@@ -148,34 +168,52 @@ export class GraffitiWall extends Agent<Env, WallState> {
             id: conn.id,
             name: state.cursorName || "Anonymous",
             x: state.cursorX,
+            // biome-ignore lint/style/noNonNullAssertion: cursorY set alongside cursorX
             y: state.cursorY!,
           });
         }
       }
       if (cursors.length > 0) {
-        this.broadcast(JSON.stringify({
-          type: "cursor_update",
-          cursors,
-        } satisfies WallMessage));
+        this.broadcast(
+          JSON.stringify({
+            type: "cursor_update",
+            cursors,
+          } satisfies WallMessage),
+        );
       }
     }, 100);
 
     // Hourly wall rotation (idempotent — only register if not already scheduled)
     const existing = this.getSchedules({ type: "interval" });
+    // biome-ignore lint/suspicious/noExplicitAny: Agents SDK schedule type is untyped
     const hasRotation = existing.some((s: any) => s.callback === "rotateWall");
     if (!hasRotation) {
+      // biome-ignore lint/suspicious/noExplicitAny: Agents SDK scheduleEvery callback param untyped
       this.scheduleEvery(3600, "rotateWall" as any);
     }
 
     // Generate initial background if none exists yet
     if (!bgRow) {
+      // biome-ignore lint/suspicious/noExplicitAny: Agents SDK schedule callback param untyped
       this.schedule(0, "rotateWall" as any);
     }
 
     // Mark methods as callable for RPC from useAgent().call()
-    registerCallable(this.contribute, { kind: "method", name: "contribute" } as any);
-    registerCallable(this.getHistory, { kind: "method", name: "getHistory" } as any);
-    registerCallable(this.getWallHistoryIndex, { kind: "method", name: "getWallHistoryIndex" } as any);
+    registerCallable(this.contribute, {
+      kind: "method",
+      name: "contribute",
+      // biome-ignore lint/suspicious/noExplicitAny: callable() decorator metadata not typed for imperative use
+    } as any);
+    registerCallable(this.getHistory, {
+      kind: "method",
+      name: "getHistory",
+      // biome-ignore lint/suspicious/noExplicitAny: callable() decorator metadata not typed for imperative use
+    } as any);
+    registerCallable(this.getWallHistoryIndex, {
+      kind: "method",
+      name: "getWallHistoryIndex",
+      // biome-ignore lint/suspicious/noExplicitAny: callable() decorator metadata not typed for imperative use
+    } as any);
   }
 
   /** Get client IP from connection state (WS) or request headers (HTTP RPC). */
@@ -193,18 +231,15 @@ export class GraffitiWall extends Agent<Env, WallState> {
       throw new Error("Bot verification required.");
     }
     const ip = this.getClientIp();
-    const resp = await fetch(
-      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          secret: this.env.TURNSTILE_SECRET,
-          response: token,
-          remoteip: ip,
-        }),
-      }
-    );
+    const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        secret: this.env.TURNSTILE_SECRET,
+        response: token,
+        remoteip: ip,
+      }),
+    });
     const result = (await resp.json()) as { success: boolean };
     if (!result.success) {
       throw new Error("Bot verification failed.");
@@ -268,8 +303,8 @@ export class GraffitiWall extends Agent<Env, WallState> {
     if (typeof message === "string" && message.startsWith("C:")) {
       // Cursor update: "C:0.45,0.32,PlayerName"
       const parts = message.slice(2).split(",");
-      const x = Math.max(0, Math.min(1, parseFloat(parts[0]) || 0));
-      const y = Math.max(0, Math.min(1, parseFloat(parts[1]) || 0));
+      const x = Math.max(0, Math.min(1, Number.parseFloat(parts[0]) || 0));
+      const y = Math.max(0, Math.min(1, Number.parseFloat(parts[1]) || 0));
       const name = (parts.slice(2).join(",") || "Anonymous").slice(0, 50);
 
       connection.setState({
@@ -350,10 +385,10 @@ export class GraffitiWall extends Agent<Env, WallState> {
     return { id };
   }
 
-  async getHistory(offset: number = 0, limit: number = 50) {
+  async getHistory(offset = 0, limit = 50) {
     // Input validation
-    offset = Math.max(0, Math.floor(Number(offset) || 0));
-    limit = Math.max(1, Math.min(Math.floor(Number(limit) || 50), 100));
+    const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
+    const safeLimit = Math.max(1, Math.min(Math.floor(Number(limit) || 50), 100));
 
     // Rate limit reads by IP
     const ip = this.getClientIp();
@@ -362,7 +397,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
     const pieces = this.sql<GraffitiPiece>`
       SELECT id, author_name, original_text, art_prompt, image_data, status, error_message, pos_x, pos_y, created_at, completed_at
-      FROM graffiti ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+      FROM graffiti ORDER BY created_at DESC LIMIT ${safeLimit} OFFSET ${safeOffset}
     `;
     return { pieces: pieces.reverse(), total: this.state.totalPieces };
   }
@@ -375,7 +410,12 @@ export class GraffitiWall extends Agent<Env, WallState> {
         WHERE id = ${id}`;
       const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
       if (piece) {
-        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+        this.broadcast(
+          JSON.stringify({
+            type: "piece_updated",
+            piece,
+          } satisfies WallMessage),
+        );
       }
     } catch (recoverErr) {
       console.error("Failed to record error state for piece", id, ":", recoverErr);
@@ -393,6 +433,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       // Step 1b: LLM-based content moderation (default-unsafe: only exact "SAFE" passes)
       const moderationResponse = (await this.env.AI.run(
+        // biome-ignore lint/suspicious/noExplicitAny: Workers AI model strings not in @cloudflare/workers-types
         "@cf/meta/llama-3.1-8b-instruct" as any,
         {
           messages: [
@@ -404,7 +445,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
             { role: "user", content: text },
           ],
           max_tokens: 5,
-        }
+        },
       )) as { response?: string };
 
       const verdict = moderationResponse.response?.trim().toUpperCase();
@@ -415,6 +456,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       // Step 2: Craft a street-art prompt via LLM
       const llmResponse = (await this.env.AI.run(
+        // biome-ignore lint/suspicious/noExplicitAny: Workers AI model strings not in @cloudflare/workers-types
         "@cf/meta/llama-3.1-8b-instruct" as any,
         {
           messages: [
@@ -426,18 +468,19 @@ export class GraffitiWall extends Agent<Env, WallState> {
             { role: "user", content: text },
           ],
           max_tokens: 100,
-        }
+        },
       )) as { response?: string };
 
       const artPrompt = (llmResponse.response?.trim() || `Street art mural of: ${text}`).slice(0, 500);
 
       // Step 3: Generate image with Flux
       const imageResponse = await this.env.AI.run(
+        // biome-ignore lint/suspicious/noExplicitAny: Workers AI model strings not in @cloudflare/workers-types
         "@cf/black-forest-labs/flux-1-schnell" as any,
-        { prompt: artPrompt, steps: 4 }
+        { prompt: artPrompt, steps: 4 },
       );
 
-      // Workers AI text-to-image returns { image: base64string }
+      // biome-ignore lint/suspicious/noExplicitAny: Workers AI text-to-image returns { image: base64string }
       const resp = imageResponse as any;
       const imageData = `data:image/png;base64,${resp.image}`;
 
@@ -451,7 +494,12 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       try {
         const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
-        this.broadcast(JSON.stringify({ type: "piece_updated", piece } satisfies WallMessage));
+        this.broadcast(
+          JSON.stringify({
+            type: "piece_updated",
+            piece,
+          } satisfies WallMessage),
+        );
       } catch (broadcastErr) {
         console.error("Broadcast failed after successful generation for piece", id, ":", broadcastErr);
       }
@@ -483,9 +531,11 @@ export class GraffitiWall extends Agent<Env, WallState> {
       const seed = `street photography, ${wall}, straight-on view, daytime, no people, no graffiti, no text, the wall takes up most of the frame`;
 
       const imageResponse = await this.env.AI.run(
+        // biome-ignore lint/suspicious/noExplicitAny: Workers AI model strings not in @cloudflare/workers-types
         "@cf/black-forest-labs/flux-1-schnell" as any,
-        { prompt: seed, steps: 4 }
+        { prompt: seed, steps: 4 },
       );
+      // biome-ignore lint/suspicious/noExplicitAny: Workers AI text-to-image returns { image: base64string }
       const bgImage = `data:image/png;base64,${(imageResponse as any).image}`;
 
       const bgId = crypto.randomUUID();
@@ -493,7 +543,8 @@ export class GraffitiWall extends Agent<Env, WallState> {
                VALUES (${bgId}, ${bgImage}, ${wall})`;
 
       // Snapshot current epoch
-      const pieceCount = this.sql<{ count: number }>`
+      const pieceCount =
+        this.sql<{ count: number }>`
         SELECT COUNT(*) as count FROM graffiti
         WHERE created_at > datetime('now', '-1 hour')
       `[0]?.count ?? 0;
@@ -532,10 +583,18 @@ export class GraffitiWall extends Agent<Env, WallState> {
                      VALUES (${snapshotId}, ${this.state.wallEpoch}, ${completedPieces.length}, ${r2Key})`;
           } catch (sqlErr) {
             console.error("wall_history_index INSERT failed (orphaned R2 key:", r2Key, "):", sqlErr);
-            try { await this.env.WALL_HISTORY.delete(r2Key); } catch { /* best effort */ }
+            try {
+              await this.env.WALL_HISTORY.delete(r2Key);
+            } catch {
+              /* best effort */
+            }
           }
           try {
-            this.broadcast(JSON.stringify({ type: "wall_history_updated" } satisfies WallMessage));
+            this.broadcast(
+              JSON.stringify({
+                type: "wall_history_updated",
+              } satisfies WallMessage),
+            );
           } catch (broadcastErr) {
             console.error("History update broadcast failed:", broadcastErr);
           }
@@ -552,11 +611,13 @@ export class GraffitiWall extends Agent<Env, WallState> {
         totalPieces: 0,
       });
 
-      this.broadcast(JSON.stringify({
-        type: "wall_rotated",
-        backgroundImage: bgImage,
-        wallEpoch: epoch,
-      } satisfies WallMessage));
+      this.broadcast(
+        JSON.stringify({
+          type: "wall_rotated",
+          backgroundImage: bgImage,
+          wallEpoch: epoch,
+        } satisfies WallMessage),
+      );
 
       // Cleanup: keep last 24 backgrounds
       this.sql`DELETE FROM wall_backgrounds WHERE id NOT IN (
@@ -640,6 +701,7 @@ const SECURITY_HEADERS = {
 // Clone response to get mutable headers (Workers responses are often immutable)
 function withSecurityHeaders(response: Response): Response {
   // WebSocket upgrades carry a non-standard .webSocket property — re-wrapping destroys it
+  // biome-ignore lint/suspicious/noExplicitAny: Workers WebSocket upgrade has non-standard .webSocket property
   if (response.status === 101 || (response as any).webSocket) {
     return response;
   }
@@ -660,17 +722,20 @@ export default {
       if (historyMatch && request.method === "GET") {
         const snapshotId = decodeURIComponent(historyMatch[1]);
         const doId = env.GRAFFITI_WALL.idFromName("wall");
+        // biome-ignore lint/suspicious/noExplicitAny: DO stub RPC methods not typed on DurableObjectStub
         const stub = env.GRAFFITI_WALL.get(doId) as any;
         const snapshot = await stub.getWallSnapshot(snapshotId);
         if (!snapshot) {
           return withSecurityHeaders(new Response("Not found", { status: 404 }));
         }
-        return withSecurityHeaders(new Response(JSON.stringify(snapshot), {
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "public, max-age=86400, immutable",
-          },
-        }));
+        return withSecurityHeaders(
+          new Response(JSON.stringify(snapshot), {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "public, max-age=86400, immutable",
+            },
+          }),
+        );
       }
 
       // Path convention: /agents/<className>/<instanceName>
@@ -682,9 +747,7 @@ export default {
         }
       }
 
-      const response =
-        (await routeAgentRequest(request, env)) ||
-        new Response("Not found", { status: 404 });
+      const response = (await routeAgentRequest(request, env)) || new Response("Not found", { status: 404 });
 
       return withSecurityHeaders(response);
     } catch (err) {
@@ -697,6 +760,7 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Env) {
     const doId = env.GRAFFITI_WALL.idFromName("wall");
+    // biome-ignore lint/suspicious/noExplicitAny: DO stub RPC methods not typed on DurableObjectStub
     const stub = env.GRAFFITI_WALL.get(doId) as any;
     await stub.cleanupOldHistory();
   },

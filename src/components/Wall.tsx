@@ -1,46 +1,35 @@
-import { useState, useRef, useCallback, type MouseEvent, type TouchEvent } from "react";
+import { type MouseEvent, type TouchEvent, useCallback, useRef, useState } from "react";
 import { useWall } from "../hooks/useWall";
-import { Header } from "./Header";
 import { CanvasPiece } from "./CanvasPiece";
-import { RemoteCursor } from "./RemoteCursor";
+import { Header } from "./Header";
 import { PlacementPrompt } from "./PlacementPrompt";
+import { RemoteCursor } from "./RemoteCursor";
 import { WallHistory } from "./WallHistory";
 
 export function Wall() {
-  const {
-    pieces,
-    contribute,
-    isSubmitting,
-    totalPieces,
-    cursors,
-    backgroundImage,
-    sendCursor,
-    wallHistory,
-  } = useWall();
+  const { pieces, contribute, isSubmitting, totalPieces, cursors, backgroundImage, sendCursor, wallHistory } =
+    useWall();
 
   const [promptPos, setPromptPos] = useState<{ x: number; y: number } | null>(null);
   const [authorName, setAuthorName] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  const toNormalized = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
-      const el = canvasRef.current;
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      const x = (clientX - rect.left) / rect.width;
-      const y = (clientY - rect.top) / rect.height;
-      return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
-    },
-    []
-  );
+  const toNormalized = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const el = canvasRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+  }, []);
 
   const handleCanvasClick = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
       const pos = toNormalized(e.clientX, e.clientY);
       if (pos) setPromptPos(pos);
     },
-    [toNormalized]
+    [toNormalized],
   );
 
   const handleCanvasTouch = useCallback(
@@ -50,7 +39,7 @@ export function Wall() {
       const pos = toNormalized(touch.clientX, touch.clientY);
       if (pos) setPromptPos(pos);
     },
-    [toNormalized]
+    [toNormalized],
   );
 
   const handleMouseMove = useCallback(
@@ -58,7 +47,7 @@ export function Wall() {
       const pos = toNormalized(e.clientX, e.clientY);
       if (pos) sendCursor(pos.x, pos.y, authorName || "Anonymous");
     },
-    [toNormalized, sendCursor, authorName]
+    [toNormalized, sendCursor, authorName],
   );
 
   const handleSubmit = useCallback(
@@ -67,7 +56,7 @@ export function Wall() {
       await contribute(text, authorName || undefined, undefined, promptPos.x, promptPos.y);
       setPromptPos(null);
     },
-    [contribute, authorName, promptPos]
+    [contribute, authorName, promptPos],
   );
 
   return (
@@ -80,6 +69,7 @@ export function Wall() {
         onHistoryToggle={() => setHistoryOpen((prev) => !prev)}
       />
 
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: spatial canvas — mouse/touch interaction only */}
       <div
         ref={canvasRef}
         className="relative flex-1 cursor-spray"
