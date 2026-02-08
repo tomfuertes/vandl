@@ -16,6 +16,7 @@ interface Env {
   WALL_HISTORY: R2Bucket;
   TURNSTILE_SECRET: string;
   TURNSTILE_SITE_KEY: string;
+  ADMIN_KEY: string;
 }
 
 // Register methods as callable imperatively (TC39 decorators
@@ -682,6 +683,45 @@ export class GraffitiWall extends Agent<Env, WallState> {
       this.sql`DELETE FROM wall_history_index WHERE id = ${id}`;
     }
   }
+
+  async adminReset(adminKey: string): Promise<{ deleted: Record<string, number>; backgroundScheduled: boolean }> {
+    if (!this.env.ADMIN_KEY || adminKey !== this.env.ADMIN_KEY) {
+      throw new Error("Unauthorized");
+    }
+
+    const counts = {
+      graffiti: this.sql<{ c: number }>`SELECT COUNT(*) as c FROM graffiti`[0]?.c ?? 0,
+      wall_history_index: this.sql<{ c: number }>`SELECT COUNT(*) as c FROM wall_history_index`[0]?.c ?? 0,
+      wall_snapshots: this.sql<{ c: number }>`SELECT COUNT(*) as c FROM wall_snapshots`[0]?.c ?? 0,
+      wall_backgrounds: this.sql<{ c: number }>`SELECT COUNT(*) as c FROM wall_backgrounds`[0]?.c ?? 0,
+      rate_limits: this.sql<{ c: number }>`SELECT COUNT(*) as c FROM rate_limits`[0]?.c ?? 0,
+    };
+
+    this.sql`DELETE FROM graffiti`;
+    this.sql`DELETE FROM wall_history_index`;
+    this.sql`DELETE FROM wall_snapshots`;
+    this.sql`DELETE FROM wall_backgrounds`;
+    this.sql`DELETE FROM rate_limits`;
+    this.setState({ totalPieces: 0, backgroundImage: null, wallEpoch: 0 });
+
+    // Broadcast and schedule are best-effort — failures must not prevent success response
+    try {
+      this.broadcast(JSON.stringify({ type: "wall_rotated", backgroundImage: "", wallEpoch: 0 } satisfies WallMessage));
+    } catch (err) {
+      console.error("adminReset broadcast failed:", err);
+    }
+
+    let backgroundScheduled = false;
+    try {
+      // biome-ignore lint/suspicious/noExplicitAny: Agents SDK schedule callback param untyped
+      this.schedule(0, "rotateWall" as any);
+      backgroundScheduled = true;
+    } catch (err) {
+      console.error("adminReset schedule(rotateWall) failed:", err);
+    }
+
+    return { deleted: counts, backgroundScheduled };
+  }
 }
 
 // Prevent callers from addressing arbitrary DO instances via /agents/:class/:name
@@ -716,6 +756,39 @@ export default {
   async fetch(request: Request, env: Env) {
     try {
       const url = new URL(request.url);
+
+      // Admin: full DB reset (temporary — remove after use)
+      if (url.pathname === "/admin/reset" && request.method === "POST") {
+        const callerIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+        const authHeader = request.headers.get("Authorization") ?? "";
+        const expected = `Bearer ${env.ADMIN_KEY}`;
+        const encoder = new TextEncoder();
+        const a = encoder.encode(authHeader);
+        const b = encoder.encode(expected);
+        // biome-ignore lint/suspicious/noExplicitAny: timingSafeEqual exists in Workers runtime but not in @cloudflare/workers-types
+        if (!env.ADMIN_KEY || a.byteLength !== b.byteLength || !(crypto.subtle as any).timingSafeEqual(a, b)) {
+          console.error(`Unauthorized admin reset attempt from IP ${callerIp}`);
+          return withSecurityHeaders(new Response("Unauthorized", { status: 401 }));
+        }
+        console.log(`Admin reset initiated from IP ${callerIp}`);
+        const doId = env.GRAFFITI_WALL.idFromName("wall");
+        // biome-ignore lint/suspicious/noExplicitAny: DO stub RPC methods not typed on DurableObjectStub
+        const stub = env.GRAFFITI_WALL.get(doId) as any;
+        try {
+          const result = await stub.adminReset(env.ADMIN_KEY);
+          return withSecurityHeaders(
+            new Response(JSON.stringify(result, null, 2), { headers: { "Content-Type": "application/json" } }),
+          );
+        } catch (err) {
+          console.error("adminReset RPC failed:", err);
+          return withSecurityHeaders(
+            new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }, null, 2), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+      }
 
       // API route: /api/wall-history/:id
       const historyMatch = url.pathname.match(/^\/api\/wall-history\/([^/]+)$/);
