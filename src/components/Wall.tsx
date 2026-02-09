@@ -1,19 +1,49 @@
-import { type MouseEvent, type TouchEvent, useCallback, useRef, useState } from "react";
+import { type MouseEvent, type TouchEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useWall } from "../hooks/useWall";
 import { CanvasPiece } from "./CanvasPiece";
 import { Header } from "./Header";
+import { OnboardingModal } from "./OnboardingModal";
 import { PlacementPrompt } from "./PlacementPrompt";
 import { RemoteCursor } from "./RemoteCursor";
 import { WallHistory } from "./WallHistory";
+
+interface UserProfile {
+  name: string;
+  style: string;
+}
 
 export function Wall() {
   const { pieces, contribute, isSubmitting, totalPieces, cursors, backgroundImage, sendCursor, wallHistory } =
     useWall();
 
   const [promptPos, setPromptPos] = useState<{ x: number; y: number } | null>(null);
-  const [authorName, setAuthorName] = useState("");
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("vandl_profile");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.style) {
+          setUserProfile(parsed);
+          return;
+        }
+      }
+    } catch {
+      // Corrupted localStorage — show onboarding
+    }
+    setShowOnboarding(true);
+  }, []);
+
+  const handleOnboardingComplete = useCallback((profile: UserProfile) => {
+    setUserProfile(profile);
+    setShowOnboarding(false);
+  }, []);
+
+  const displayName = userProfile?.name || "Anonymous";
 
   const toNormalized = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
     const el = canvasRef.current;
@@ -45,26 +75,34 @@ export function Wall() {
   const handleMouseMove = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
       const pos = toNormalized(e.clientX, e.clientY);
-      if (pos) sendCursor(pos.x, pos.y, authorName || "Anonymous");
+      if (pos) sendCursor(pos.x, pos.y, displayName);
     },
-    [toNormalized, sendCursor, authorName],
+    [toNormalized, sendCursor, displayName],
   );
 
   const handleSubmit = useCallback(
     async (text: string) => {
       if (!promptPos) return;
-      await contribute(text, authorName || undefined, undefined, promptPos.x, promptPos.y);
+      await contribute(
+        text,
+        userProfile?.name || undefined,
+        userProfile?.style || undefined,
+        undefined,
+        promptPos.x,
+        promptPos.y,
+      );
       setPromptPos(null);
     },
-    [contribute, authorName, promptPos],
+    [contribute, userProfile, promptPos],
   );
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-zinc-950 text-white flex flex-col">
+      {showOnboarding && <OnboardingModal onComplete={handleOnboardingComplete} />}
+
       <Header
         totalPieces={totalPieces}
-        authorName={authorName}
-        onAuthorNameChange={setAuthorName}
+        authorName={displayName}
         historyCount={wallHistory.index.length}
         onHistoryToggle={() => setHistoryOpen((prev) => !prev)}
       />

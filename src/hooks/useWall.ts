@@ -74,10 +74,17 @@ export function useWall() {
   refreshHistoryRef.current = wallHistory.refreshIndex;
 
   const contribute = useCallback(
-    async (text: string, authorName?: string, turnstileToken?: string, posX?: number, posY?: number) => {
+    async (
+      text: string,
+      authorName?: string,
+      style?: string,
+      turnstileToken?: string,
+      posX?: number,
+      posY?: number,
+    ) => {
       setIsSubmitting(true);
       try {
-        await agent.call("contribute", [text, authorName, turnstileToken, posX, posY]);
+        await agent.call("contribute", [text, authorName, style, turnstileToken, posX, posY]);
       } finally {
         setIsSubmitting(false);
       }
