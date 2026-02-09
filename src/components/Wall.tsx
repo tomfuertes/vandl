@@ -1,16 +1,12 @@
 import { type MouseEvent, type TouchEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useWall } from "../hooks/useWall";
+import type { UserProfile } from "../types";
 import { CanvasPiece } from "./CanvasPiece";
 import { Header } from "./Header";
 import { OnboardingModal } from "./OnboardingModal";
 import { PlacementPrompt } from "./PlacementPrompt";
 import { RemoteCursor } from "./RemoteCursor";
 import { WallHistory } from "./WallHistory";
-
-interface UserProfile {
-  name: string;
-  style: string;
-}
 
 export function Wall() {
   const { pieces, contribute, isSubmitting, totalPieces, cursors, backgroundImage, sendCursor, wallHistory } =

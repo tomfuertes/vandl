@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { UserProfile } from "../types";
 
 interface OnboardingModalProps {
-  onComplete: (profile: { name: string; style: string }) => void;
+  onComplete: (profile: UserProfile) => void;
 }
 
 const STYLE_PRESETS = [

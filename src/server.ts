@@ -377,6 +377,9 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
     const name = sanitizeInput(authorName ?? "").clean.slice(0, 50) || "Anonymous";
     const cleanStyle = style ? sanitizeInput(style).clean.slice(0, 150) || null : null;
+    if (cleanStyle && cleanStyle.length < 5) {
+      throw new Error("Style must be at least 5 characters.");
+    }
     const id = crypto.randomUUID();
     const x = Math.max(0, Math.min(1, Number(posX) || 0.5));
     const y = Math.max(0, Math.min(1, Number(posY) || 0.5));

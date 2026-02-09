@@ -13,6 +13,11 @@ export interface GraffitiPiece {
   completed_at: string | null;
 }
 
+export interface UserProfile {
+  name: string;
+  style: string;
+}
+
 export interface WallState {
   totalPieces: number;
   backgroundImage: string | null;
