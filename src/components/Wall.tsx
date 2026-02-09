@@ -23,8 +23,8 @@ export function Wall() {
       const stored = localStorage.getItem("vandl_profile");
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.style) {
-          setUserProfile(parsed);
+        if (typeof parsed?.style === "string" && parsed.style.length > 0) {
+          setUserProfile({ name: String(parsed.name || "Anonymous"), style: parsed.style });
           return;
         }
       }

@@ -438,9 +438,12 @@ export class GraffitiWall extends Agent<Env, WallState> {
   async generateArt(payload: { id: string; text: string }) {
     const { id, text } = payload;
     try {
-      // Step 1a: Fast regex pre-filter for obvious profanity/slurs (check both text and style)
+      // Bail early if the piece was deleted (e.g., rotateWall ran between contribute and generateArt)
       const row = this.sql<{ style: string | null }>`SELECT style FROM graffiti WHERE id = ${id}`[0];
-      const pieceStyle = row?.style;
+      if (!row) return;
+      const pieceStyle = row.style;
+
+      // Step 1a: Fast regex pre-filter for obvious profanity/slurs (check both text and style)
 
       if (containsProfanity(text) || (pieceStyle && containsProfanity(pieceStyle))) {
         this.failPiece(id, "Content flagged by moderation");
@@ -516,6 +519,7 @@ export class GraffitiWall extends Agent<Env, WallState> {
 
       try {
         const piece = this.sql<GraffitiPiece>`SELECT * FROM graffiti WHERE id = ${id}`[0];
+        if (!piece) return; // Piece deleted mid-generation (e.g., wall rotated)
         this.broadcast(
           JSON.stringify({
             type: "piece_updated",
