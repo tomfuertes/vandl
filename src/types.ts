@@ -6,10 +6,16 @@ export interface GraffitiPiece {
   image_data: string | null;
   status: "generating" | "complete" | "failed";
   error_message: string | null;
+  style: string | null;
   pos_x: number;
   pos_y: number;
   created_at: string;
   completed_at: string | null;
+}
+
+export interface UserProfile {
+  name: string;
+  style: string;
 }
 
 export interface WallState {
