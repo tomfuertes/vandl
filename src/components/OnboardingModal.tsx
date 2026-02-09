@@ -31,8 +31,13 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
       name: name.trim() || "Anonymous",
       style: style.trim(),
     };
-    localStorage.setItem("vandl_profile", JSON.stringify(profile));
+    try {
+      localStorage.setItem("vandl_profile", JSON.stringify(profile));
+    } catch {
+      // Storage unavailable (private browsing, quota, etc.) — proceed in-memory only
+    }
     setPhase("handoff");
+    // Delay matches the handoff animation duration in styles.css
     setTimeout(() => onComplete(profile), 1200);
   }, [canSubmit, name, style, onComplete]);
 
